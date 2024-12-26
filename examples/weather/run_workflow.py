@@ -1,7 +1,6 @@
 import asyncio
 from temporalio import client
 from rojak.agents import OpenAIAgent
-from rojak.retrievers import QdrantRetriever
 from rojak.types import RetryOptions, RetryPolicy
 from rojak import Rojak
 
@@ -14,7 +13,6 @@ async def main() -> None:
         name="Weather Assistant",
         instructions="Help provide the weather forecast.",
         functions=["get_weather", "send_email"],
-        retriever=QdrantRetriever(),
         retry_options=RetryOptions(
             retry_policy=RetryPolicy(maximum_attempts=5),
             timeout_in_seconds=20,
