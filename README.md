@@ -4,7 +4,7 @@ Highly durable and scalable multi-agent orchestration framework.
 
 > [!WARNING]
 >
-> This project is currently under heavy development. Please be aware that significant changes may occur.
+> This project is a work in progress. Please be aware that significant changes may occur.
 
 ## Install
 
