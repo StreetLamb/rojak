@@ -17,7 +17,7 @@ pip install git+ssh://git@github.com/streetlamb/rojak.git
 or
 
 ```shell
-pip install git+ssh://git@github.com/streetlamb/rojak.git
+pip install git+https://git@github.com/streetlamb/rojak.git
 ```
 
 ## Usage
