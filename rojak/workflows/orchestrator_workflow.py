@@ -220,21 +220,16 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                         workflow.now(),
                         "Continue as new due to messages exceeding history size.",
                     )
-                    workflow.continue_as_new(
-                        args=[
-                            OrchestratorParams(
-                                agent=params.agent,
-                                history_size=self.history_size,
-                                max_turns=self.max_turns,
-                                messages=[
-                                    ConversationMessage(
-                                        role="assistant",
-                                        content=response.output,
-                                    )
-                                ],
-                            )
-                        ]
-                    )
+
+                    new_params = copy.deepcopy(params)
+                    new_params.messages = [
+                        ConversationMessage(
+                            role="assistant",
+                            content=response.output,
+                        )
+                    ]
+                    workflow.continue_as_new(args=[new_params])
+
             except (ChildWorkflowError, ActivityError) as e:
                 # Return messages to previous state and wait for new messages
                 match e:
