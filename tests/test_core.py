@@ -305,6 +305,59 @@ async def test_send_multiple_messages(mock_openai_client: MockOpenAIClient):
 
 
 @pytest.mark.asyncio
+async def test_session_result(mock_openai_client: MockOpenAIClient):
+    task_queue_name = str(uuid.uuid4())
+
+    def transfer_agent_b(context_variables: dict):
+        context_variables["seen"] = True
+        return AgentExecuteFnResult(
+            output="Transferred to Agent B",
+            context_variables=context_variables,
+            agent=agent_b,
+        )
+
+    # set mock to return a response that triggers function call
+    mock_openai_client.set_sequential_responses(
+        [
+            create_mock_response(
+                message={"role": "assistant", "content": ""},
+                function_calls=[
+                    {
+                        "name": "transfer_agent_b",
+                        "args": {},
+                    },
+                ],
+            ),
+            create_mock_response(
+                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT}
+            ),
+        ]
+    )
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        agent_a = OpenAIAgent(name="Agent A", functions=["transfer_agent_b"])
+        agent_b = OpenAIAgent(name="Agent B")
+        openai_activities = OpenAIAgentActivities(
+            OpenAIAgentOptions(
+                client=mock_openai_client, all_functions=[transfer_agent_b]
+            )
+        )
+        rojak = Rojak(client=env.client, task_queue=task_queue_name)
+        worker = await rojak.create_worker([openai_activities])
+        async with worker:
+            session_id = str(uuid.uuid4())
+            session = await rojak.create_session(session_id, agent_a)
+            response = await session.send_message(
+                {"role": "user", "content": "I want to talk to agent B"},
+                agent_a,
+                {"seen": False},
+            )
+            assert response.context_variables["seen"] is True
+            assert response.messages[-1].role == "assistant"
+            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+
+
+@pytest.mark.asyncio
 async def test_get_result(mock_openai_client: MockOpenAIClient):
     task_queue_name = str(uuid.uuid4())
     async with await WorkflowEnvironment.start_time_skipping() as env:

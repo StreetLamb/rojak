@@ -296,9 +296,9 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
             self.queue.append((params.message, params.agent, params.context_variables))
             await workflow.wait_condition(lambda: self.pending is False)
             return OrchestratorResponse(
-                messages=self.messages,
-                agent=self.agent,
-                context_variables=params.context_variables,
+                messages=self.result.messages,
+                agent=self.result.agent,
+                context_variables=self.result.context_variables,
             )
 
     @workflow.query
