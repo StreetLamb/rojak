@@ -346,11 +346,10 @@ async def test_session_result(mock_openai_client: MockOpenAIClient):
         worker = await rojak.create_worker([openai_activities])
         async with worker:
             session_id = str(uuid.uuid4())
-            session = await rojak.create_session(session_id, agent_a)
+            session = await rojak.create_session(session_id, agent_a, {"seen": False})
             response = await session.send_message(
                 {"role": "user", "content": "I want to talk to agent B"},
                 agent_a,
-                {"seen": False},
             )
             assert response.context_variables["seen"] is True
             assert response.messages[-1].role == "assistant"
@@ -407,7 +406,8 @@ async def test_get_config(mock_openai_client: MockOpenAIClient):
             )
 
             response: dict[str, any] = await session.get_config()
-            assert list(response.keys()) == ["debug", "history_size", "max_turns"]
+            expected_keys = {"debug", "history_size", "context_variables", "max_turns"}
+            assert expected_keys.issubset(response.keys())
 
 
 @pytest.mark.asyncio
@@ -431,9 +431,14 @@ async def test_update_config(mock_openai_client: MockOpenAIClient):
                 message={"role": "user", "content": "Hello how are you?"},
             )
 
-            await session.update_config(UpdateConfigParams(max_turns=100, debug=True))
+            await session.update_config(
+                UpdateConfigParams(
+                    context_variables={"hello": "world"}, max_turns=100, debug=True
+                )
+            )
 
             response: dict[str, any] = await session.get_config()
 
             assert response["debug"] is True
             assert response["max_turns"] == 100
+            assert response["context_variables"].get("hello") == "world"

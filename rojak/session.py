@@ -22,7 +22,6 @@ class Session:
         self,
         message: ConversationMessage,
         agent: Agent,
-        context_variables: dict = {},
     ) -> OrchestratorResponse:
         """Send a message to the first agent
 
@@ -36,7 +35,7 @@ class Session:
         """
         return await self.workflow_handle.execute_update(
             OrchestratorWorkflow.send_message,
-            SendMessageParams(message, agent, context_variables),
+            SendMessageParams(message, agent),
             result_type=OrchestratorResponse,
         )
 

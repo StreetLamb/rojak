@@ -128,7 +128,7 @@ class Rojak:
             OrchestratorResponse: A response object containing updated messages and context_variables.
         """
         data = ShortOrchestratorParams(
-            agent, max_turns, messages, debug, context_variables
+            agent, context_variables, max_turns, messages, debug
         )
         return await self.client.execute_workflow(
             ShortOrchestratorWorkflow.run,
@@ -165,6 +165,7 @@ class Rojak:
         self,
         session_id: str,
         agent: Agent,
+        context_variables: dict = {},
         max_turns: int = float("inf"),
         history_size: int = 10,
         debug: bool = False,
@@ -174,6 +175,7 @@ class Rojak:
         Args:
             session_id (str): Unique identifier of the session.
             agent (Agent): The initial agent to be called.
+            context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
             max_turns (int, optional): The maximum number of conversational turns allowed. Defaults to float("inf").
             history_size (int, optional): The maximum number of messages retained in the list before older messages are removed. When this limit is exceeded, the messages are summarized, and the summary becomes the first message in a new list. Defaults to 10.
             debug (bool, optional): If True, enables debug logging. Defaults to False.
@@ -182,7 +184,11 @@ class Rojak:
             Session: The Session object created.
         """
         data = OrchestratorParams(
-            agent=agent, max_turns=max_turns, history_size=history_size, debug=debug
+            agent=agent,
+            context_variables=context_variables,
+            max_turns=max_turns,
+            history_size=history_size,
+            debug=debug,
         )
         try:
             workflow_handle = await self.client.start_workflow(
