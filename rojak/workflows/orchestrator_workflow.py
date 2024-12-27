@@ -233,6 +233,7 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                                         content=response.output,
                                     )
                                 ],
+                                debug=self.debug,
                             )
                         ]
                     )

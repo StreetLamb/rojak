@@ -472,6 +472,7 @@ async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
                 "max_turns": 30,
                 "context_variables": {"hello": "world"},
                 "history_size": 1,
+                "debug": True,
             }
             session = await rojak.create_session(
                 session_id=str(uuid.uuid4()),
@@ -479,6 +480,7 @@ async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
                 max_turns=configs["max_turns"],
                 context_variables=configs["context_variables"],
                 history_size=configs["history_size"],
+                debug=configs["debug"],
             )
 
             response = await session.send_message(
@@ -491,3 +493,4 @@ async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
             assert response["max_turns"] == configs["max_turns"]
             assert response["context_variables"] == configs["context_variables"]
             assert response["history_size"] == configs["history_size"]
+            assert response["debug"] == configs["debug"]
