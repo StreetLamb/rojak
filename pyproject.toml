@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rojak"
-version = "0.1.3"
+version = "0.1.4"
 description = "Durable and scalable multi-agent orchestration framework."
 authors = ["StreetLamb <l.y.z.jerron@gmail.com>"]
 readme = "README.md"
