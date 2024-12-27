@@ -87,23 +87,34 @@ async def test_callable_instructions(mock_openai_client: MockOpenAIClient):
 
 
 @pytest.mark.asyncio
-async def test_tool_call(mock_openai_client: MockOpenAIClient):
+async def test_multiple_tool_calls(mock_openai_client: MockOpenAIClient):
     task_queue_name = str(uuid.uuid4())
 
     expected_location = "San Francisco"
 
     # set up mock to record function calls
     get_weather_mock = Mock()
+    get_air_quality_mock = Mock()
 
     def get_weather(location: str, context_variables: dict):
         res = f"It's sunny today in {context_variables.get("location")}"
-        get_weather_mock(location=location, context_variables=context_variables.copy())
+        get_weather_mock(location=location)
         get_weather_mock.return_value = res
-        context_variables["status"] = "completed"
+        context_variables["seen"].append("get_weather")
+        return AgentExecuteFnResult(output=res, context_variables=context_variables)
+
+    def get_air_quality(location: str, context_variables: dict):
+        res = f"Air quality in {context_variables.get("location")} is good!"
+        get_air_quality_mock(location=location)
+        get_air_quality_mock.return_value = res
+        context_variables["seen"].append("get_air_quality")
         return AgentExecuteFnResult(output=res, context_variables=context_variables)
 
     messages = [
-        {"role": "user", "content": "What's the weather like in San Francisco?"}
+        {
+            "role": "user",
+            "content": "What's the weather and air quality like in San Francisco?",
+        }
     ]
 
     # set mock to return a response that triggers function call
@@ -112,7 +123,11 @@ async def test_tool_call(mock_openai_client: MockOpenAIClient):
             create_mock_response(
                 message={"role": "assistant", "content": ""},
                 function_calls=[
-                    {"name": "get_weather", "args": {"location": expected_location}}
+                    {"name": "get_weather", "args": {"location": expected_location}},
+                    {
+                        "name": "get_air_quality",
+                        "args": {"location": expected_location},
+                    },
                 ],
             ),
             create_mock_response(
@@ -122,27 +137,31 @@ async def test_tool_call(mock_openai_client: MockOpenAIClient):
     )
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
-        agent = OpenAIAgent(name="Test Agent", functions=["get_weather"])
+        agent = OpenAIAgent(
+            name="Test Agent", functions=["get_weather", "get_air_quality"]
+        )
         openai_activities = OpenAIAgentActivities(
-            OpenAIAgentOptions(client=mock_openai_client, all_functions=[get_weather])
+            OpenAIAgentOptions(
+                client=mock_openai_client, all_functions=[get_weather, get_air_quality]
+            )
         )
         rojak = Rojak(client=env.client, task_queue=task_queue_name)
         worker = await rojak.create_worker([openai_activities])
         async with worker:
-            context_variables = {"location": expected_location}
+            context_variables = {"location": expected_location, "seen": []}
             response = await rojak.run(
                 id=str(uuid.uuid4()),
                 agent=agent,
                 messages=messages,
                 context_variables=context_variables,
             )
-            get_weather_mock.assert_called_once_with(
-                location=expected_location, context_variables=context_variables
-            )
+            get_weather_mock.assert_called_once_with(location=expected_location)
+            get_air_quality_mock.assert_called_once_with(location=expected_location)
             assert get_weather_mock.return_value == (
                 f"It's sunny today in {context_variables.get("location")}"
             )
-            assert response.context_variables.get("status") == "completed"
+            assert "get_weather" in response.context_variables.get("seen")
+            assert "get_air_quality" in response.context_variables.get("seen")
             assert response.messages[-1].role == "assistant"
             assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 

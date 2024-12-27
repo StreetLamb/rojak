@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 import json
@@ -127,12 +126,13 @@ class AgentWorkflow:
                 self.debug, workflow.now(), f"{params.agent.name}: {tool_calls}"
             )
 
-            results = await asyncio.gather(
-                *[
-                    self.handle_tool_call(tool_call, context_variables)
-                    for tool_call in tool_calls
-                ]
-            )
+            # TODO: Figure out how to handle concurrent tool calls without race conditions in context_variables
+            results = []
+            for tool_call in tool_calls:
+                result = await self.handle_tool_call(tool_call, context_variables)
+                assert isinstance(result.output, ToolResponse)
+                context_variables = result.output.output.context_variables
+                results.append(result)
 
             final_result: AgentWorkflowResponse | None = None
             for result in results:
