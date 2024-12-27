@@ -39,21 +39,21 @@ class Session:
             result_type=OrchestratorResponse,
         )
 
-    def get_result(self) -> OrchestratorResponse:
+    async def get_result(self) -> OrchestratorResponse:
         """Get the latest response.
 
         Returns:
             OrchestratorResponse: Response object containing updated messages and context_variables.
         """
-        return self.workflow_handle.query(OrchestratorWorkflow.get_result)
+        return await self.workflow_handle.query(OrchestratorWorkflow.get_result)
 
-    def get_config(self) -> dict[str, any]:
+    async def get_config(self) -> dict[str, any]:
         """Retrieve the current session configuration.
 
         Returns:
             dict[str, any]: A dictionary with the current session's configuration values.
         """
-        return self.workflow_handle.query(OrchestratorWorkflow.get_config)
+        return await self.workflow_handle.query(OrchestratorWorkflow.get_config)
 
     async def update_config(self, params: UpdateConfigParams):
         """Update the session's configuration with specified changes.

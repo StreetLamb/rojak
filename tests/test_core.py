@@ -442,3 +442,52 @@ async def test_update_config(mock_openai_client: MockOpenAIClient):
             assert response["debug"] is True
             assert response["max_turns"] == 100
             assert response["context_variables"].get("hello") == "world"
+
+
+@pytest.mark.asyncio
+async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
+    task_queue_name = str(uuid.uuid4())
+
+    mock_openai_client.set_sequential_responses(
+        [
+            create_mock_response(
+                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT}
+            ),
+            create_mock_response(
+                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2}
+            ),
+        ]
+    )
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        rojak = Rojak(client=env.client, task_queue=task_queue_name)
+        openai_activities = OpenAIAgentActivities(
+            OpenAIAgentOptions(client=mock_openai_client)
+        )
+        worker = await rojak.create_worker([openai_activities])
+        async with worker:
+            agent = OpenAIAgent(name="assistant")
+            configs = {
+                "agent": agent,
+                "max_turns": 30,
+                "context_variables": {"hello": "world"},
+                "history_size": 1,
+            }
+            session = await rojak.create_session(
+                session_id=str(uuid.uuid4()),
+                agent=configs["agent"],
+                max_turns=configs["max_turns"],
+                context_variables=configs["context_variables"],
+                history_size=configs["history_size"],
+            )
+
+            response = await session.send_message(
+                agent=agent,
+                message={"role": "user", "content": "Hello how are you?"},
+            )
+            print(response)
+            session = await rojak.get_session(session_id=session.workflow_handle.id)
+            response = await session.get_config()
+            assert response["max_turns"] == configs["max_turns"]
+            assert response["context_variables"] == configs["context_variables"]
+            assert response["history_size"] == configs["history_size"]
