@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from openai import NotGiven, OpenAI
 from temporalio import activity
 from rojak.utils import function_to_json
@@ -35,8 +35,12 @@ class OpenAIAgentOptions(AgentOptions):
 @dataclass
 class OpenAIAgent(Agent):
     model: str = "gpt-4o-mini"
-    type: str = field(default="openai")
+
+    type: Literal["openai"] = field(default="openai")
+    """Type of agent. Must be `"openai"`."""
+
     inference_config: dict[str, Any] | None = None
+    """Inference configuration for OpenAI models"""
 
 
 class OpenAIAgentActivities(AgentActivities):

@@ -122,14 +122,14 @@ class AgentInstructionOptions:
 
 @dataclass
 class Agent(ABC):
-    name: str
-    """The name of the agent."""
-
     model: str
     """The LLM model to use."""
 
     type: str
     """The prefix of the activity name."""
+
+    name: str = "Agent"
+    """The name of the agent."""
 
     instructions: str | AgentInstructionOptions = "You are a helpful assistant."
     """Instructions for the agent, can be a string or a callable returning a string."""
