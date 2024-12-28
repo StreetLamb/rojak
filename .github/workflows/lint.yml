@@ -33,4 +33,4 @@ jobs:
   
       - name: Run tests with pytest
         run: |
-            ruff check .
+            poetry run ruff check .
