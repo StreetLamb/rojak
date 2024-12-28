@@ -7,18 +7,15 @@ from rojak.agents import (
     AgentExecuteFnResult,
 )
 import json
-from rojak.retrievers import (
-    QdrantRetrieverActivities,
-    QdrantRetrieverOptions,
-)
 
 
-def get_weather(location, time="now"):
+def get_weather(location: str, time="now"):
     """Get the current weather in a given location. Location MUST be a city."""
     return json.dumps({"location": location, "temperature": "65", "time": time})
 
 
-def send_email(recipient, subject, body, context_variables):
+def send_email(recipient: str, subject: str, body: str, context_variables: dict):
+    """Send an email to a recipient."""
     print("Sending email...")
     print(f"To: {recipient}")
     print(f"Subject: {subject}")
@@ -38,14 +35,8 @@ async def main():
         )
     )
 
-    qdrant_retriever = QdrantRetrieverActivities(
-        QdrantRetrieverOptions(
-            url="http://localhost:6333", collection_name="demo_collection"
-        )
-    )
-
     rojak = Rojak(temporal_client, task_queue="weather-tasks")
-    worker = await rojak.create_worker([openai_activities], [qdrant_retriever])
+    worker = await rojak.create_worker(agent_activities=[openai_activities])
     await worker.run()
 
 
