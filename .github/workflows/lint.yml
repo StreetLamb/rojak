@@ -1,4 +1,4 @@
-name: Run tests
+name: Run Lint checks
 
 on:
   push:
@@ -10,7 +10,8 @@ on:
       - synchronize
 
 jobs:
-  test:
+  lint:
+    name: Run Ruff
     runs-on: ubuntu-latest
 
     steps:
@@ -24,11 +25,12 @@ jobs:
 
       - name: Install Poetry
         run: |
-          curl -sSL https://install.python-poetry.org | python - -y
+            curl -sSL https://install.python-poetry.org | python - -y
 
       - name: Install dependencies
         run: |
-          poetry install --all-extras --no-interaction
+            poetry install --all-extras --no-interaction
   
       - name: Run tests with pytest
-        run: poetry run pytest
+        run: |
+            poetry run ruff check .
