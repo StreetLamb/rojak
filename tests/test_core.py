@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import Mock
 import uuid
 import pytest
@@ -483,11 +484,11 @@ async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
                 debug=configs["debug"],
             )
 
-            response = await session.send_message(
+            await session.send_message(
                 agent=agent,
                 message={"role": "user", "content": "Hello how are you?"},
             )
-            print(response)
+            await asyncio.sleep(1)
             session = await rojak.get_session(session_id=session.workflow_handle.id)
             response = await session.get_config()
             assert response["max_turns"] == configs["max_turns"]
