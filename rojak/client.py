@@ -89,7 +89,7 @@ class Rojak:
             ScheduleHandle: A handle to the created schedule.
         """
         data = ShortOrchestratorParams(
-            agent, max_turns, messages, debug, context_variables
+            agent, context_variables, max_turns, messages, debug
         )
 
         return await self.client.create_schedule(
