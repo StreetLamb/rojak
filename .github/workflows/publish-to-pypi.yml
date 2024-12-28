@@ -32,7 +32,7 @@ jobs:
 
       - name: Build release distributions
         run: |
-          poetry install --sync --no-interaction
+          poetry install --all-extras --no-interaction
           poetry build
 
       - name: Upload distributions
