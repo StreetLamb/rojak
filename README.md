@@ -1,10 +1,14 @@
-# Rojak 
+# Rojak
 
-Highly durable and scalable multi-agent orchestration framework.
+Open-source framework for building highly durable and scalable multi-agent orchestrations.
 
-> [!WARNING]
->
-> This project is a work in progress. Please be aware that significant changes may occur.
+## Features
+- 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
+- 📈 **Scalable** - Manage unlimited agents, and handle multiple chat sessions in parallel.
+- 🗂️ **State Management** - Messages, contexts and other states are automatically managed and preserved, even during failures. No complex database transactions required.
+- ⏰ **Scheduling** - Schedule to run your agents at specific times, days, date or intervals.
+- 👁️ **Visiblity** - Track your agents’ past and current actions in real time through a user-friendly browser-based UI.
+- 🌐 **Universal Deployment** - Deploy and run locally or on any cloud platform.
 
 ## Install
 
@@ -27,54 +31,60 @@ pip install rojak[qdrant-client]
 
 
 ```python
-# main.py
+import asyncio
 from temporalio.client import Client
 from rojak import Rojak
 from rojak.agents import OpenAIAgentActivities, OpenAIAgentOptions, OpenAIAgent
-import asyncio
+
+# Function to transfer control to Agent B
+def transfer_to_agent_b():
+    return agent_b
+
+# Define Agent A
+agent_a = OpenAIAgent(
+    name="Agent A",
+    instructions="You are a helpful agent.",
+    functions=["transfer_to_agent_b"]
+)
+
+# Define Agent B
+agent_b = OpenAIAgent(
+    name="Agent B",
+    instructions="Only speak in Haikus."
+)
 
 
 async def main():
-    client = await Client.connect("localhost:7233")
+    # Connect to the Temporal service
+    temporal_client = await Client.connect("localhost:7233")
 
-    def transfer_to_agent_b():
-        return agent_b
+    # Initialise the Rojak client.
+    rojak = Rojak(temporal_client, task_queue="tasks")
 
+    # Configure agent activities
     openai_activities = OpenAIAgentActivities(
         OpenAIAgentOptions(
-            api_key="...",
+            api_key="YOUR_API_KEY_HERE",  # Replace with your OpenAI API key
             all_functions=[transfer_to_agent_b]
         )
     )
 
-    rojak = Rojak(client, task_queue="tasks")
-
-    worker = await rojak.create_worker([openai_activities])
+    # Create the worker
+    worker = await rojak.create_worker(agent_activities=[openai_activities])
 
     async with worker:
-        agent_a = OpenAIAgent(
-            name="Agent A",
-            instructions="You are a helpful agent.",
-            functions=["transfer_to_agent_b"]
-        )
-
-        agent_b = OpenAIAgent(
-            name="Agent B",
-            instructions="Only speak in Haikus.",
-        )
-
+        # Run the multi-agent workflow
         response = await rojak.run(
             id="unique-id",
             agent=agent_a,
             messages=[{"role": "user", "content": "I want to talk to agent B."}]
         )
 
+        # Print agent's response
         print(response.messages[-1].content)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 
 ```
@@ -86,6 +96,7 @@ What do you wish for?
 ## Table of Contents
 
 - [Rojak](#rojak)
+  - [Features](#features)
   - [Install](#install)
   - [Usage](#usage)
   - [Table of Contents](#table-of-contents)
