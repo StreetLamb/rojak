@@ -1,3 +1,4 @@
+from typing import AsyncIterator, Literal
 import warnings
 from temporalio.client import (
     Client,
@@ -62,10 +63,51 @@ class Rojak:
 
         return worker
 
+    async def list_scheduled_runs(
+        self,
+        schedule_id: str,
+        statuses: list[
+            Literal[
+                "Running", "Completed", "Failed", "Cancelled", "Terminated", "TimedOut"
+            ]
+        ]
+        | None = None,
+        limit: int = 10,
+        page_size: int = 1000,
+        next_page_token: bytes | None = None,
+    ) -> AsyncIterator[str]:
+        """List the ID of orchestrators associated with the schedule.
+
+        Args:
+            schedule_id (str): Unique identifier of the schedule.
+            statuses (list[ Literal[ 'Running', 'Completed', 'Failed', 'Cancelled', 'Terminated', 'TimedOut' ] ] | None, optional): List of statuses to filter the runs. Defaults to None.
+            limit (int, optional): Maximum number of IDs to return. Defaults to 10.
+            page_size (int, optional): Maximum number of results per page. Defaults to 1000.
+            next_page_token (bytes | None, optional): A previously obtained next page token if doing pagination. Usually not needed as the iterator automatically starts from the beginning. Defaults to None.
+
+        Returns:
+            AsyncIterator[str]:  An async iterator that can be used with `async for`.
+        """
+        status_filter = (
+            " OR ".join(f'ExecutionStatus="{status}"' for status in statuses)
+            if statuses
+            else ""
+        )
+        query = f'TemporalScheduledById="{schedule_id}"'
+        if status_filter:
+            query += f" AND ({status_filter})"
+
+        async for workflow_execution in self.client.list_workflows(
+            query=query,
+            limit=limit,
+            page_size=page_size,
+            next_page_token=next_page_token,
+        ):
+            yield workflow_execution.id
+
     async def create_schedule(
         self,
         schedule_id: str,
-        run_id: str,
         schedule_spec: ScheduleSpec,
         agent: Agent,
         messages: list[ConversationMessage],
@@ -75,9 +117,10 @@ class Rojak:
     ) -> ScheduleHandle:
         """Create a schedule and return its handle.
 
+        The schedule periodically executes the equivalent of the `run()` method with the provided inputs.
+
         Args:
             schedule_id (str): Unique identifier of the schedule.
-            run_id (str): Unique identifier of the run.
             schedule_spec (ScheduleSpec): Specification on when the action is taken.
             agent (Agent): The initial agent to be called.
             messages (list[ConversationMessage]): A list of message objects.
@@ -98,7 +141,7 @@ class Rojak:
                 action=ScheduleActionStartWorkflow(
                     ShortOrchestratorWorkflow.run,
                     data,
-                    id=run_id,
+                    id=schedule_id,
                     task_queue=self.task_queue,
                 ),
                 spec=schedule_spec,
@@ -114,10 +157,12 @@ class Rojak:
         max_turns: int = float("inf"),
         debug: bool = False,
     ) -> OrchestratorResponse:
-        """Send messages to initial agent and wait for completion.
+        """Initialise an orchestrator with the provided inputs and wait for completion.
+
+        Requires a running worker.
 
         Args:
-            id (str): Unique identifier of the run.
+            id (str): Unique identifier of the orchestrator.
             agent (Agent): The initial agent to be called.
             messages (list[ConversationMessage]): A list of message objects.
             context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
@@ -125,7 +170,7 @@ class Rojak:
             debug (bool, optional): If True, enables debug logging. Defaults to False.
 
         Returns:
-            OrchestratorResponse: A response object containing updated messages and context_variables.
+            OrchestratorResponse: A response object containing updated messages, context_variables and agent.
         """
         data = ShortOrchestratorParams(
             agent, context_variables, max_turns, messages, debug
@@ -136,6 +181,24 @@ class Rojak:
             id=id,
             task_queue=self.task_queue,
         )
+
+    async def get_run_result(self, id: str) -> OrchestratorResponse:
+        """Get result from a completed orchestrator.
+
+        Results are not stored indefinitely and may have been removed depending on your Retention Period.
+
+        Requires a running worker.
+
+        Args:
+            id (str): Unique identifier of the orchestrator.
+
+        Returns:
+            OrchestratorResponse: A response object containing updated messages, context_variables and agent.
+        """
+        workflow_handle = self.client.get_workflow_handle(
+            id, result_type=OrchestratorResponse
+        )
+        return await workflow_handle.result()
 
     async def get_session(self, session_id: str) -> Session:
         """Retrieve the session with the given ID.
