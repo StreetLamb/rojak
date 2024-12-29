@@ -49,6 +49,29 @@ async def test_run_with_messages(mock_openai_client: MockOpenAIClient):
 
 
 @pytest.mark.asyncio
+async def test_get_run_result(mock_openai_client: MockOpenAIClient):
+    task_queue_name = str(uuid.uuid4())
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        rojak = Rojak(client=env.client, task_queue=task_queue_name)
+        openai_activities = OpenAIAgentActivities(
+            OpenAIAgentOptions(client=mock_openai_client)
+        )
+        worker = await rojak.create_worker([openai_activities])
+        async with worker:
+            agent = OpenAIAgent(name="assistant")
+            id = str(uuid.uuid4())
+            await rojak.run(
+                id=id,
+                agent=agent,
+                messages=[{"role": "user", "content": "Hello how are you?"}],
+            )
+
+            response = await rojak.get_run_result(id)
+            assert response.messages[-1].role == "assistant"
+            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+
+
+@pytest.mark.asyncio
 async def test_callable_instructions(mock_openai_client: MockOpenAIClient):
     task_queue_name = str(uuid.uuid4())
 
