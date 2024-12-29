@@ -23,7 +23,7 @@ class Session:
         message: ConversationMessage,
         agent: Agent,
     ) -> OrchestratorResponse:
-        """Send a message to the first agent
+        """Send a message to the agent specified.
 
         Args:
             message (ConversationMessage): New query as a message object.
@@ -31,7 +31,7 @@ class Session:
             context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
 
         Returns:
-            OrchestratorResponse: A response object containing updated messages and context_variables.
+            OrchestratorResponse: A response object containing updated messages, context_variables and agent.
         """
         return await self.workflow_handle.execute_update(
             OrchestratorWorkflow.send_message,
@@ -42,6 +42,8 @@ class Session:
     async def get_result(self) -> OrchestratorResponse:
         """Get the latest response.
 
+        Requires a running worker.
+
         Returns:
             OrchestratorResponse: Response object containing updated messages and context_variables.
         """
@@ -50,6 +52,8 @@ class Session:
     async def get_config(self) -> dict[str, any]:
         """Retrieve the current session configuration.
 
+        Requires a running worker.
+
         Returns:
             dict[str, any]: A dictionary with the current session's configuration values.
         """
@@ -57,6 +61,8 @@ class Session:
 
     async def update_config(self, params: UpdateConfigParams):
         """Update the session's configuration with specified changes.
+
+        Requires a running worker.
 
         Args:
             params (UpdateConfigParams): A dictionary containing only the configuration values that need to be updated.
