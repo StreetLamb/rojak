@@ -104,6 +104,7 @@ What do you wish for?
     - [Handoffs and Updating Context Variables](#handoffs-and-updating-context-variables)
     - [Function Schemas](#function-schemas)
     - [Retrievers](#retrievers)
+    - [Timeouts and Retries](#timeouts-and-retries)
   - [Sessions](#sessions)
     - [`rojak.create_session()`](#rojakcreate_session)
       - [Arguments](#arguments-1)
@@ -113,9 +114,9 @@ What do you wish for?
       - [Arguments](#arguments-3)
     - [Other Session methods](#other-session-methods)
   - [Schedules](#schedules)
-    - [`client.create_schedule()`](#clientcreate_schedule)
+    - [`rojak.create_schedule()`](#rojakcreate_schedule)
       - [Arguments](#arguments-4)
-    - [`client.list_scheduled_runs()`](#clientlist_scheduled_runs)
+    - [`rojak.list_scheduled_runs()`](#rojaklist_scheduled_runs)
 
 # Overview
 
@@ -514,6 +515,26 @@ async with worker:
     print(response.messages[-1]["content"])
 ```
 
+### Timeouts and Retries
+
+Rojak leverages Temporal’s built-in durability and fault tolerance to ensure robust and reliable workflows. However, you can further fine-tune this behavior using `RetryOptions`, which provides extensive configuration for handling timeouts and retries.
+
+With `RetryOptions`, you can customise parameters such as the maximum number of retry attempts, timeout durations, backoff coefficients, and specify exceptions that should not trigger retries. This level of control allows you to adapt to the specific needs of your workflow.
+
+For instance, if you have a tool-calling function that might take a long time to complete, you can change the timeout to 2 minutes. Additionally, you can change the retry attempts to 10 times in case of failure before abandoning the operation. Here’s an example:
+```python
+from rojak.types import RetryOptions, RetryPolicy
+from rojak.agents.openai_agent import OpenAIAgent
+
+# Create an agent with a custom timeout and retry policy.
+agent = OpenAIAgent(retry_options=RetryOptions(
+    timeout_in_seconds=120,
+    retry_policy=RetryPolicy(
+        maximum_attempts=10
+    )
+))
+```
+
 
 ## Sessions
 
@@ -615,7 +636,7 @@ await session.send_message(
 
 Schedules allow you to automatically execute workflows at specific times, on specific days or dates, or at regular intervals, making them ideal for automating recurring tasks or time-based operations.
 
-### `client.create_schedule()`
+### `rojak.create_schedule()`
 
 You can create a schedule by specifying the timing details (schedule_spec) and the required inputs for each associated workflow.
 
@@ -651,9 +672,9 @@ await rojak.create_schedule(
 )
 ```
 
-### `client.list_scheduled_runs()`
+### `rojak.list_scheduled_runs()`
 
-This method retrieves a list of orchestrator workflow IDs associated with a schedule. This can be combined with `client.get_run_result()` to access the `OrchestratorResponse` of each run:
+This method retrieves a list of orchestrator workflow IDs associated with a schedule. This can be combined with `rojak.get_run_result()` to access the `OrchestratorResponse` of each run:
 
 ```python
 rojak = Rojak(temporal_client, task_queue="tasks")
@@ -672,4 +693,3 @@ async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Compl
 ```
 Hello! How can I assist you today?
 ```
-
