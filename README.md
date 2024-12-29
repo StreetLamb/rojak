@@ -112,6 +112,10 @@ What do you wish for?
     - [`session.send_message()`](#sessionsend_message)
       - [Arguments](#arguments-3)
     - [Other Session methods](#other-session-methods)
+  - [Schedules](#schedules)
+    - [`client.create_schedule()`](#clientcreate_schedule)
+      - [Arguments](#arguments-4)
+    - [`client.list_scheduled_runs()`](#clientlist_scheduled_runs)
 
 # Overview
 
@@ -605,3 +609,67 @@ await session.send_message(
 - `session.get_config()`: Get the current configuration.
 - `session.update_config()`: Update the current configuration.
 - `session.cancel()`: Cancel the long-running workflow.
+
+
+## Schedules
+
+Schedules allow you to automatically execute workflows at specific times, on specific days or dates, or at regular intervals, making them ideal for automating recurring tasks or time-based operations.
+
+### `client.create_schedule()`
+
+You can create a schedule by specifying the timing details (schedule_spec) and the required inputs for each associated workflow.
+
+#### Arguments
+
+| Argument              | Type                        | Description                                                                                  | Default        |
+| --------------------- | --------------------------- | -------------------------------------------------------------------------------------------- | -------------- |
+| **schedule_id**       | `str`                       | Unique identifier of the schedule.                                                           | (required)     |
+| **schedule_spec**     | `ScheduleSpec`              | Specification on when the action is taken.                                                   | (required)     |
+| **agent**             | `Agent`                     | The initial agent to be called.                                                              | (required)     |
+| **messages**          | `list[ConversationMessage]` | A list of message objects.                                                                   | (required)     |
+| **context_variables** | `dict`                      | A dictionary of additional context variables, available to functions and Agent instructions. | `{}`           |
+| **max_turns**         | `int`                       | The maximum number of conversational turns allowed.                                          | `float("inf")` |
+| **debug**             | `bool`                      | If True, enables debug logging.                                                              | `False`        |
+
+
+```python
+from rojak import Rojak, ScheduleSpec, ScheduleIntervalSpec
+from datetime import timedelta
+from temporalio.client import Client
+
+
+temporal_client = await Client.connect("localhost:7233")
+rojak = Rojak(temporal_client, task_queue="tasks")
+
+# Create schedule to start a run every hour.
+await rojak.create_schedule(
+    schedule_id=schedule_id,
+    schedule_spec=ScheduleSpec(
+        intervals=[ScheduleIntervalSpec(every=timedelta(hours=1))]),
+    agent=agent,
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+### `client.list_scheduled_runs()`
+
+This method retrieves a list of orchestrator workflow IDs associated with a schedule. This can be combined with `client.get_run_result()` to access the `OrchestratorResponse` of each run:
+
+```python
+rojak = Rojak(temporal_client, task_queue="tasks")
+
+agent_activities = OpenAIAgentActivities(OpenAIAgentOptions())
+
+worker = await rojak.create_worker(agent_activities=[agent_activities])
+
+async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Completed"]):
+    async with worker:
+        response = await rojak.get_run_result(workflow_id)
+        print(response.messages[-1].content)
+    break
+```
+
+```
+Hello! How can I assist you today?
+```
+
