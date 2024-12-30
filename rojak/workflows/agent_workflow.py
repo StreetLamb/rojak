@@ -231,6 +231,8 @@ class AgentWorkflow:
                 f"Failed to process tool call '{name}'. "
                 f"Error will be sent to agent to reassess. Error: {e}"
             )
-            result = AgentExecuteFnResult(output=str(e.cause))
+            result = AgentExecuteFnResult(
+                output=str(e.cause), context_variables=context_variables
+            )
             tool_response = ToolResponse(tool_call_id=tool_call.id, output=result)
             return AgentWorkflowResponse(output=tool_response, sender=self.agent.name)

@@ -111,6 +111,76 @@ async def test_callable_instructions(mock_openai_client: MockOpenAIClient):
 
 
 @pytest.mark.asyncio
+async def test_failed_tool_call(mock_openai_client: MockOpenAIClient):
+    """Context variable should be updated by first tool call only since 2nd tool call fails."""
+    task_queue_name = str(uuid.uuid4())
+
+    get_weather_mock = Mock()
+    get_air_quality_mock = Mock()
+
+    def get_weather(context_variables: dict):
+        get_weather_mock()
+        context_variables["seen"].append("get_weather")
+        raise Exception("Something went wrong!")
+
+    def get_air_quality(context_variables: dict):
+        get_air_quality_mock()
+        context_variables["seen"].append("get_air_quality")
+        return AgentExecuteFnResult(
+            output="Air quality is great!", context_variables=context_variables
+        )
+
+    messages = [
+        {
+            "role": "user",
+            "content": "What's the weather and air quality like in San Francisco?",
+        }
+    ]
+
+    # set mock to return a response that triggers function call
+    mock_openai_client.set_sequential_responses(
+        [
+            create_mock_response(
+                message={"role": "assistant", "content": ""},
+                function_calls=[{"name": "get_air_quality", "args": {}}],
+            ),
+            create_mock_response(
+                message={"role": "assistant", "content": ""},
+                function_calls=[{"name": "get_weather", "args": {}}],
+            ),
+            create_mock_response(
+                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT}
+            ),
+        ]
+    )
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        agent = OpenAIAgent(
+            name="Test Agent", functions=["get_weather", "get_air_quality"]
+        )
+        openai_activities = OpenAIAgentActivities(
+            OpenAIAgentOptions(
+                client=mock_openai_client, all_functions=[get_weather, get_air_quality]
+            )
+        )
+        rojak = Rojak(client=env.client, task_queue=task_queue_name)
+        worker = await rojak.create_worker([openai_activities])
+        async with worker:
+            context_variables = {"seen": ["test"]}
+            response = await rojak.run(
+                id=str(uuid.uuid4()),
+                agent=agent,
+                messages=messages,
+                context_variables=context_variables,
+            )
+            get_weather_mock.assert_called()
+            get_air_quality_mock.assert_called_once()
+            assert response.context_variables["seen"] == ["test", "get_air_quality"]
+            assert response.messages[-1].role == "assistant"
+            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+
+
+@pytest.mark.asyncio
 async def test_multiple_tool_calls(mock_openai_client: MockOpenAIClient):
     task_queue_name = str(uuid.uuid4())
 
