@@ -114,10 +114,11 @@ class AgentWorkflow:
 
         # dont use isinstance to check as response output type different for different llm providers
         if response.type == "tool":
-            tool_calls: list[dict] = response.output
+            tool_calls = response.tool_calls
             params.messages.append(
                 ConversationMessage(
                     role="assistant",
+                    content=response.content,
                     tool_calls=tool_calls,
                     sender=params.agent.name,
                 ),
@@ -127,7 +128,7 @@ class AgentWorkflow:
             )
 
             # TODO: Figure out how to handle concurrent tool calls without race conditions in context_variables
-            results = []
+            results: list[AgentWorkflowResponse] = []
             for tool_call in tool_calls:
                 result = await self.handle_tool_call(tool_call, context_variables)
                 assert isinstance(result.output, ToolResponse)
@@ -161,19 +162,19 @@ class AgentWorkflow:
                 final_result = results[-1]
 
         else:
-            assert isinstance(response.output, str)
+            assert isinstance(response.content, str)
             params.messages.append(
                 ConversationMessage(
                     role="assistant",
-                    content=response.output,
+                    content=response.content,
                     sender=params.agent.name,
                 )
             )
             debug_print(
-                self.debug, workflow.now(), f"{params.agent.name}: {response.output}"
+                self.debug, workflow.now(), f"{params.agent.name}: {response.content}"
             )
             final_result = AgentWorkflowResponse(
-                output=response.output, sender=params.agent.name
+                output=response.content, sender=params.agent.name
             )
 
         return final_result, params.messages
