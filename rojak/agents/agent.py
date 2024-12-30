@@ -93,19 +93,22 @@ class AgentToolCall:
 class AgentResponse:
     """Response object from generating response from model."""
 
-    output: str | list[AgentToolCall]
-    """The model output as a string or list of tool call objects."""
-
     type: Literal["text", "tool"]
     """Specify if it is a natural language or a tool call response."""
 
+    content: str | None = None
+    """String output from the model"""
+
+    tool_calls: list[AgentToolCall] | None = None
+    """List of tool call objects."""
+
     def __post_init__(self):
-        if isinstance(self.output, list):
-            self.output = [
+        if self.tool_calls:
+            self.tool_calls = [
                 tool_call
                 if isinstance(tool_call, AgentToolCall)
                 else AgentToolCall(**tool_call)
-                for tool_call in self.output
+                for tool_call in self.tool_calls
             ]
 
 

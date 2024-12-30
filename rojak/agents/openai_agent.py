@@ -62,16 +62,17 @@ class OpenAIAgentActivities(AgentActivities):
     def handle_model_response(response: ChatCompletion) -> AgentResponse:
         """Convert model response to AgentResponse"""
         message = response.choices[0].message
-        if message.content:
-            return AgentResponse(output=message.content, type="text")
-        elif message.tool_calls:
+        if message.tool_calls:
             tool_calls = [
                 AgentToolCall(**dict(tool_call)) for tool_call in message.tool_calls
             ]
             return AgentResponse(
-                output=tool_calls,
+                content=message.content,
+                tool_calls=tool_calls,
                 type="tool",
             )
+        elif message.content:
+            return AgentResponse(content=message.content, type="text")
         else:
             raise ValueError("Unknown message type")
 

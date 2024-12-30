@@ -212,9 +212,9 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                     )
                     response = await self.summarise()
                     debug_print(
-                        self.debug, workflow.now(), f"Summary: {response.output}"
+                        self.debug, workflow.now(), f"Summary: {response.content}"
                     )
-                    assert isinstance(response.output, str)
+                    assert isinstance(response.content, str)
                     debug_print(
                         self.debug,
                         workflow.now(),
@@ -230,7 +230,7 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                                 messages=[
                                     ConversationMessage(
                                         role="assistant",
-                                        content=response.output,
+                                        content=response.content,
                                     )
                                 ],
                                 debug=self.debug,
