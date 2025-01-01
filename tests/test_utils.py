@@ -1,7 +1,7 @@
-from rojak.utils import function_to_json
+from rojak.utils import function_to_json, function_to_json_anthropic
 
 
-def test_basic_function():
+def test_basic_openai_function():
     def basic_function(arg1, arg2):
         return arg1 + arg2
 
@@ -19,6 +19,29 @@ def test_basic_function():
                 },
                 "required": ["arg1", "arg2"],
             },
+        },
+    }
+
+
+def test_basic_anthropic_function():
+    def basic_function(arg1, arg2):
+        return arg1 + arg2
+
+    result = function_to_json_anthropic(basic_function)
+    assert result == {
+        "name": "basic_function",
+        "description": "",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "arg1": {
+                    "type": "string",
+                },
+                "arg2": {
+                    "type": "string",
+                },
+            },
+            "required": ["arg1", "arg2"],
         },
     }
 
@@ -46,5 +69,37 @@ def test_complex_function():
                 },
                 "required": ["arg1", "arg2"],
             },
+        },
+    }
+
+
+def test_complex_anthropic_function():
+    def complex_function_with_types_and_descriptions(
+        arg1: int, arg2: str, arg3: float = 3.14, arg4: bool = False
+    ):
+        """This is a complex function with a docstring."""
+        pass
+
+    result = function_to_json_anthropic(complex_function_with_types_and_descriptions)
+    assert result == {
+        "name": "complex_function_with_types_and_descriptions",
+        "description": "This is a complex function with a docstring.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "arg1": {
+                    "type": "integer",
+                },
+                "arg2": {
+                    "type": "string",
+                },
+                "arg3": {
+                    "type": "number",
+                },
+                "arg4": {
+                    "type": "boolean",
+                },
+            },
+            "required": ["arg1", "arg2"],
         },
     }
