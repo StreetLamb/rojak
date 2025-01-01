@@ -3,7 +3,7 @@ import json
 import os
 from typing import Literal
 from temporalio import activity
-from anthropic import Anthropic, NotGiven
+from anthropic import Anthropic, AnthropicBedrock, NotGiven
 from anthropic.types import (
     Message,
     TextBlock,
@@ -31,7 +31,7 @@ from rojak.utils.helpers import function_to_json_anthropic
 @dataclass
 class AnthropicAgentOptions(AgentOptions):
     api_key: str | None = None
-    client: Anthropic | None = None
+    client: Anthropic | AnthropicBedrock | None = None
     inference_config: dict[str, any] = field(
         default_factory=lambda: {
             "max_tokens": 1000,
