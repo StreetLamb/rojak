@@ -15,9 +15,10 @@ from rojak.agents import (
     AgentResponse,
     AgentExecuteFnResult,
     OpenAIAgent,
+    AnthropicAgent,
 )
 
-AgentTypes = OpenAIAgent
+AgentTypes = OpenAIAgent | AnthropicAgent
 
 
 @dataclass
