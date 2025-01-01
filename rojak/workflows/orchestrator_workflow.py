@@ -20,6 +20,8 @@ from rojak.agents import (
     Agent,
     AgentCallParams,
     AgentResponse,
+    AnthropicAgent,
+    OpenAIAgent,
 )
 
 
@@ -39,6 +41,13 @@ class OrchestratorBaseParams:
 
     debug: bool = False
     """If True, enables debug logging"""
+
+    def __post_init__(self):
+        if isinstance(self.agent, dict):
+            if self.agent.type == "anthropic":
+                self.agent = AnthropicAgent(**self.agent)
+            elif self.agent.type == "openai":
+                self.agent = OpenAIAgent(**self.agent)
 
 
 @dataclass

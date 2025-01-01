@@ -17,13 +17,21 @@ Install the core Rojak library:
 pip install rojak
 ```
 
-To create agents that interact with OpenAI, include the openai extra:
+Install dependencies for the specific model providers you need:
 ```shell
+# For OpenAI models
 pip install rojak[openai]
+
+# For Anthropic models
+pip install rojak[anthropic]
+
+# For both OpenAI and Anthropic models
+pip install rojak[openai,anthropic]
 ```
 
-To enable Qdrant retrievers, include the qdrant-client extra:
+Rojak also supports retrievers. Install the dependencies as required:
 ```shell
+# For Qdrant
 pip install rojak[qdrant-client]
 ```
 
@@ -258,6 +266,7 @@ While it's tempting to personify an `Agent` as "someone who does X", it can also
 
 Available built-in `Agent` classes:
 - `OpenAIAgent` - For interacting with OpenAI models.
+- `AnthropicAgent` - For interacting with Anthropic models.
 
 
 ### `Agent` Abstract Class Fields
