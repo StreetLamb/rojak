@@ -65,11 +65,10 @@ async def test_max_turns(mock_openai_client: MockOpenAIClient):
                 max_turns=2,
             )
 
-            response = await session.send_message(
+            response = await session.send_messages(
                 agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
+                messages=[{"role": "user", "content": "Hello how are you?"}],
             )
-            print(response.messages)
             # Should not reach agent 2.
             assert response.messages[-1].sender != "Test Agent 2"
 
@@ -89,9 +88,9 @@ async def test_history_size(mock_openai_client: MockOpenAIClient):
                 session_id=str(uuid.uuid4()), agent=agent, history_size=1
             )
 
-            response = await session.send_message(
+            response = await session.send_messages(
                 agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
+                messages=[{"role": "user", "content": "Hello how are you?"}],
             )
 
             assert len(response.messages) == 2
@@ -134,9 +133,9 @@ async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
                     debug=configs["debug"],
                 )
 
-                await session.send_message(
+                await session.send_messages(
                     agent=agent,
-                    message={"role": "user", "content": "Hello how are you?"},
+                    messages=[{"role": "user", "content": "Hello how are you?"}],
                 )
                 await asyncio.sleep(1)
 
@@ -168,9 +167,9 @@ async def test_get_result(mock_openai_client: MockOpenAIClient):
                 agent=agent,
             )
 
-            await session.send_message(
+            await session.send_messages(
                 agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
+                messages=[{"role": "user", "content": "Hello how are you?"}],
             )
 
             response: OrchestratorResponse = await session.get_result()
@@ -196,9 +195,9 @@ async def test_update_config(mock_openai_client: MockOpenAIClient):
                 agent=agent,
             )
 
-            await session.send_message(
+            await session.send_messages(
                 agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
+                messages=[{"role": "user", "content": "Hello how are you?"}],
             )
 
             await session.update_config(

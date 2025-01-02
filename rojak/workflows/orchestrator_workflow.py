@@ -75,9 +75,9 @@ class OrchestratorResponse:
 
 
 @dataclass
-class SendMessageParams:
-    message: ConversationMessage
-    """A message object."""
+class SendMessagesParams:
+    messages: list[ConversationMessage]
+    """List of message object."""
 
     agent: AgentTypes
     """The agent to be called."""
@@ -202,7 +202,7 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
     def __init__(self, params: OrchestratorParams) -> None:
         super().__init__(params)
         self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
-        self.queue: deque[tuple[ConversationMessage, Agent]] = deque()
+        self.queue: deque[tuple[list[ConversationMessage], Agent]] = deque()
         self.pending: bool = False
         self.history_size: int = params.history_size
         # Stores latest response
@@ -212,13 +212,15 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
     async def run(self, params: OrchestratorParams) -> OrchestratorResponse:
         while True:
             await workflow.wait_condition(lambda: bool(self.queue))
-            message, agent = self.queue.popleft()
+            messages, agent = self.queue.popleft()
             past_message_state = copy.deepcopy(self.messages)
-            self.messages.append(message)
+            self.messages += messages
 
-            debug_print(
-                self.debug, workflow.now(), f"{message.role}: {message.content}"
-            )
+            for message in messages:
+                debug_print(
+                    self.debug, workflow.now(), f"{message.role}: {message.content}"
+                )
+
             active_agent = self.agent = agent
             init_len = len(self.messages)
 
@@ -283,13 +285,13 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                 continue
 
     @workflow.update(unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON)
-    async def send_message(
+    async def send_messages(
         self,
-        params: SendMessageParams,
+        params: SendMessagesParams,
     ) -> OrchestratorResponse:
         async with self.lock:
             self.pending = True
-            self.queue.append((params.message, params.agent))
+            self.queue.append((params.messages, params.agent))
             await workflow.wait_condition(lambda: self.pending is False)
             return self.result
 

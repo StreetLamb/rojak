@@ -389,17 +389,17 @@ async def test_send_multiple_messages(mock_anthropic_client: MockAnthropicClient
                 agent=agent,
             )
 
-            response: OrchestratorResponse = await session.send_message(
+            response: OrchestratorResponse = await session.send_messages(
                 agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
+                messages=[{"role": "user", "content": "Hello how are you?"}],
             )
             assert response.agent == agent
             assert response.messages[-1].role == "assistant"
             assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
-            response2: OrchestratorResponse = await session.send_message(
+            response2: OrchestratorResponse = await session.send_messages(
                 agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
+                messages=[{"role": "user", "content": "Hello how are you?"}],
             )
             assert response2.agent == agent
             assert response2.messages[-1].role == "assistant"
@@ -449,8 +449,8 @@ async def test_session_result(mock_anthropic_client: MockAnthropicClient):
         async with worker:
             session_id = str(uuid.uuid4())
             session = await rojak.create_session(session_id, agent_a, {"seen": False})
-            response = await session.send_message(
-                {"role": "user", "content": "I want to talk to agent B"},
+            response = await session.send_messages(
+                [{"role": "user", "content": "I want to talk to agent B"}],
                 agent_a,
             )
             assert response.context_variables["seen"] is True

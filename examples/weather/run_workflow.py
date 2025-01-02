@@ -27,11 +27,13 @@ async def main() -> None:
         debug=True,
     )
 
-    response = await session.send_message(
-        message={
-            "role": "user",
-            "content": "What is the weather like in Malaysia and Singapore?",
-        },
+    response = await session.send_messages(
+        messages=[
+            {
+                "role": "user",
+                "content": "What is the weather like in Malaysia and Singapore?",
+            }
+        ],
         agent=weather_agent,
     )
     print(response.messages[-1].content)

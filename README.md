@@ -129,7 +129,7 @@ What do you wish for?
       - [Arguments](#arguments-1)
     - [`session.get_session()`](#sessionget_session)
       - [Arguments](#arguments-2)
-    - [`session.send_message()`](#sessionsend_message)
+    - [`session.send_messages()`](#sessionsend_messages)
       - [Arguments](#arguments-3)
     - [Other Session methods](#other-session-methods)
   - [Schedules](#schedules)
@@ -602,16 +602,16 @@ If you have a already running session, you can get it using `session.get_session
 | -------------- | ----- | --------------------------------- | ---------- |
 | **session_id** | `str` | Unique identifier of the session. | (required) |
 
-### `session.send_message()`
+### `session.send_messages()`
 
-The `send_message()` method passes your message to the agent specified. The response is an `OrchestratorResponse`, similar to the response from `rojak.run()`.
+The `send_messages()` method passes your messages to the agent specified. The response is an `OrchestratorResponse`, similar to the response from `rojak.run()`.
 
 #### Arguments
 
-| Argument    | Type                  | Description                    | Default    |
-| ----------- | --------------------- | ------------------------------ | ---------- |
-| **message** | `ConversationMessage` | New query as a message object. | (required) |
-| **agent**   | `Agent`               | Agent to send the message to.  | (required) |
+| Argument     | Type                        | Description                            | Default    |
+| ------------ | --------------------------- | -------------------------------------- | ---------- |
+| **messages** | `list[ConversationMessage]` | New query as a list of message object. | (required) |
+| **agent**    | `Agent`                     | Agent to send the message to.          | (required) |
 
 ```python
 
@@ -630,16 +630,16 @@ session = await rojak.create_session(
 )
 
 # Send a message
-response = await session.send_message(
-    message={"role": "user", "content": "Can you help me with my order?"},
+response = await session.send_messages(
+    messages=[{"role": "user", "content": "Can you help me with my order?"}],
     agent=agent
 )
 
 print(response.messages[-1]["content"])
 
 # Send another message
-await session.send_message(
-    message={"role": "user", "content": "Thank you!"},
+await session.send_messages(
+    messages=[{"role": "user", "content": "Thank you!"}],
     agent=agent
 )
 ```
