@@ -11,6 +11,7 @@ with workflow.unsafe.imports_passed_through():
         OrchestratorResponse,
         SendMessageParams,
         UpdateConfigParams,
+        GetConfigResponse,
     )
 
 
@@ -49,15 +50,17 @@ class Session:
         """
         return await self.workflow_handle.query(OrchestratorWorkflow.get_result)
 
-    async def get_config(self) -> dict[str, any]:
+    async def get_config(self) -> GetConfigResponse:
         """Retrieve the current session configuration.
 
         Requires a running worker.
 
         Returns:
-            dict[str, any]: A dictionary with the current session's configuration values.
+            GetConfigResponse: Current session's configuration values.
         """
-        return await self.workflow_handle.query(OrchestratorWorkflow.get_config)
+        return await self.workflow_handle.query(
+            OrchestratorWorkflow.get_config, result_type=GetConfigResponse
+        )
 
     async def update_config(self, params: UpdateConfigParams):
         """Update the session's configuration with specified changes.

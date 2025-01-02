@@ -9,7 +9,7 @@ from rojak.types import (
 )
 from collections import deque
 import asyncio
-from rojak.utils import create_retry_policy, debug_print
+from rojak.utils import debug_print
 from rojak.workflows.agent_workflow import (
     AgentWorkflow,
     AgentWorkflowRunParams,
@@ -18,8 +18,6 @@ from rojak.workflows.agent_workflow import (
 )
 from rojak.agents import (
     Agent,
-    AgentCallParams,
-    AgentResponse,
     AnthropicAgent,
     OpenAIAgent,
 )
@@ -87,6 +85,9 @@ class SendMessageParams:
 
 @dataclass
 class UpdateConfigParams:
+    messages: list[ConversationMessage] | None = None
+    """A list of message objects."""
+
     context_variables: ContextVariables | None = None
     """The dictionary of the updated context variables."""
 
@@ -97,6 +98,24 @@ class UpdateConfigParams:
     """The maximum number of messages retained in the list before older messages are removed."""
 
     debug: bool | None = None
+    """If True, enables debug logging"""
+
+
+@dataclass
+class GetConfigResponse:
+    messages: list[ConversationMessage]
+    """A list of message objects."""
+
+    context_variables: ContextVariables
+    """The dictionary of the updated context variables."""
+
+    max_turns: int | float
+    """The maximum number of conversational turns allowed."""
+
+    history_size: int
+    """The maximum number of messages retained in the list before older messages are removed."""
+
+    debug: bool
     """If True, enables debug logging"""
 
 
@@ -214,20 +233,23 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                 )
                 self.pending = False
 
+                # Wait for all handlers to finish before checking if messages exceed limits
+                await workflow.wait_condition(lambda: workflow.all_handlers_finished())
+
                 # Summarise chat and start new workflow if messages exceeds `history_size` limit
                 if len(self.messages) > self.history_size:
-                    await workflow.wait_condition(
-                        lambda: workflow.all_handlers_finished()
-                    )
-                    response = await self.summarise()
-                    debug_print(
-                        self.debug, workflow.now(), f"Summary: {response.content}"
-                    )
-                    assert isinstance(response.content, str)
+                    self.messages = self.messages[-self.history_size :]
+
+                workflow_history_size = workflow.info().get_current_history_size()
+                workflow_history_length = workflow.info().get_current_history_length()
+                if (
+                    workflow_history_length > 10_000
+                    or workflow_history_size > 20_000_000
+                ):
                     debug_print(
                         self.debug,
                         workflow.now(),
-                        "Continue as new due to messages exceeding history size.",
+                        "Continue as new due to prevent workflow event history from exceeding limit.",
                     )
                     workflow.continue_as_new(
                         args=[
@@ -236,12 +258,7 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                                 history_size=self.history_size,
                                 max_turns=self.max_turns,
                                 context_variables=self.context_variables,
-                                messages=[
-                                    ConversationMessage(
-                                        role="assistant",
-                                        content=response.content,
-                                    )
-                                ],
+                                messages=self.messages,
                                 debug=self.debug,
                             )
                         ]
@@ -265,30 +282,6 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
                 self.pending = False
                 continue
 
-    async def summarise(self) -> AgentResponse:
-        """Use the last agent used to generate a summary of the conversation."""
-        messages_string = "\n\n".join(
-            f"{message.role}: {message.content}" for message in self.messages
-        )
-        summary_prompt = (
-            "This is the conversation history between a user and a chatbot:\n\n"
-            + f"{messages_string}\n\n Please produce a three sentence summary of "
-            + "this conversation."
-        )
-        response: AgentResponse = await workflow.execute_activity(
-            f"{self.agent.type}_call",
-            AgentCallParams(
-                messages=[ConversationMessage(role="user", content=summary_prompt)],
-                model=self.agent.model,
-            ),
-            start_to_close_timeout=timedelta(
-                seconds=self.agent.retry_options.timeout_in_seconds
-            ),
-            retry_policy=create_retry_policy(self.agent.retry_options.retry_policy),
-            result_type=AgentResponse,
-        )
-        return response
-
     @workflow.update(unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON)
     async def send_message(
         self,
@@ -305,16 +298,19 @@ class OrchestratorWorkflow(OrchestratorBaseWorkflow):
         return self.result
 
     @workflow.query
-    def get_config(self) -> dict:
-        return {
-            "context_variables": self.context_variables,
-            "max_turns": self.max_turns,
-            "history_size": self.history_size,
-            "debug": self.debug,
-        }
+    def get_config(self) -> GetConfigResponse:
+        return GetConfigResponse(
+            messages=self.messages,
+            context_variables=self.context_variables,
+            max_turns=self.max_turns,
+            history_size=self.history_size,
+            debug=self.debug,
+        )
 
     @workflow.signal
     def update_config(self, params: UpdateConfigParams):
+        if params.messages is not None:
+            self.messages = params.messages
         if params.context_variables is not None:
             self.context_variables = params.context_variables
         if params.max_turns is not None:

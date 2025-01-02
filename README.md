@@ -591,7 +591,7 @@ session = await rojak.create_session(
 | **history_size**      | `int`   | The maximum number of messages.                                                              | `10`           |
 | **debug**             | `bool`  | If `True`, enables debug logging.                                                            | `False`        |
 
-The `history_size` argument limits the maximum number of messages. If this limit is reached, Rojak will summarise the conversation history using the previously utilised LLM model. The summary will replace the message history, and Rojak will continue as a new Orchestrator workflow, retaining all current configurations.
+The `history_size` argument limits the maximum number of messages stored. If this limit is reached, Rojak will only retain the most recent n messages.
 
 ### `session.get_session()`
 

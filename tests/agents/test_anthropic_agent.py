@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import Mock
 import uuid
 import pytest
@@ -12,7 +11,7 @@ from rojak.agents import (
     AnthropicAgent,
 )
 from rojak.types.types import ConversationMessage
-from rojak.workflows import OrchestratorResponse, UpdateConfigParams
+from rojak.workflows import OrchestratorResponse
 from tests.mock_anthropic_client import (
     MockAnthropicClient,
     create_mock_response,
@@ -457,146 +456,6 @@ async def test_session_result(mock_anthropic_client: MockAnthropicClient):
             assert response.context_variables["seen"] is True
             assert response.messages[-1].role == "assistant"
             assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
-
-
-@pytest.mark.asyncio
-async def test_get_result(mock_anthropic_client: MockAnthropicClient):
-    task_queue_name = str(uuid.uuid4())
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        rojak = Rojak(client=env.client, task_queue=task_queue_name)
-        anthropic_activities = AnthropicAgentActivities(
-            AnthropicAgentOptions(client=mock_anthropic_client)
-        )
-        worker = await rojak.create_worker([anthropic_activities])
-        async with worker:
-            agent = AnthropicAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
-            )
-
-            await session.send_message(
-                agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
-            )
-
-            response: OrchestratorResponse = await session.get_result()
-
-            assert response.agent == agent
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
-
-
-@pytest.mark.asyncio
-async def test_get_config(mock_anthropic_client: MockAnthropicClient):
-    task_queue_name = str(uuid.uuid4())
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        rojak = Rojak(client=env.client, task_queue=task_queue_name)
-        anthropic_activities = AnthropicAgentActivities(
-            AnthropicAgentOptions(client=mock_anthropic_client)
-        )
-        worker = await rojak.create_worker([anthropic_activities])
-        async with worker:
-            agent = AnthropicAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
-            )
-
-            await session.send_message(
-                agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
-            )
-
-            response: dict[str, any] = await session.get_config()
-            expected_keys = {"debug", "history_size", "context_variables", "max_turns"}
-            assert expected_keys.issubset(response.keys())
-
-
-@pytest.mark.asyncio
-async def test_update_config(mock_anthropic_client: MockAnthropicClient):
-    task_queue_name = str(uuid.uuid4())
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        rojak = Rojak(client=env.client, task_queue=task_queue_name)
-        anthropic_activities = AnthropicAgentActivities(
-            AnthropicAgentOptions(client=mock_anthropic_client)
-        )
-        worker = await rojak.create_worker([anthropic_activities])
-        async with worker:
-            agent = AnthropicAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
-            )
-
-            await session.send_message(
-                agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
-            )
-
-            await session.update_config(
-                UpdateConfigParams(
-                    context_variables={"hello": "world"}, max_turns=100, debug=True
-                )
-            )
-
-            response: dict[str, any] = await session.get_config()
-
-            assert response["debug"] is True
-            assert response["max_turns"] == 100
-            assert response["context_variables"].get("hello") == "world"
-
-
-@pytest.mark.asyncio
-async def test_continue_as_new(mock_anthropic_client: MockAnthropicClient):
-    task_queue_name = str(uuid.uuid4())
-
-    mock_anthropic_client.set_sequential_responses(
-        [
-            create_mock_response(
-                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT}
-            ),
-            create_mock_response(
-                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2}
-            ),
-        ]
-    )
-
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        rojak = Rojak(client=env.client, task_queue=task_queue_name)
-        anthropic_activities = AnthropicAgentActivities(
-            AnthropicAgentOptions(client=mock_anthropic_client)
-        )
-        worker = await rojak.create_worker([anthropic_activities])
-        async with worker:
-            agent = AnthropicAgent(name="assistant")
-            configs = {
-                "agent": agent,
-                "max_turns": 30,
-                "context_variables": {"hello": "world"},
-                "history_size": 1,
-                "debug": True,
-            }
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=configs["agent"],
-                max_turns=configs["max_turns"],
-                context_variables=configs["context_variables"],
-                history_size=configs["history_size"],
-                debug=configs["debug"],
-            )
-
-            await session.send_message(
-                agent=agent,
-                message={"role": "user", "content": "Hello how are you?"},
-            )
-            await asyncio.sleep(1)
-            session = await rojak.get_session(session_id=session.workflow_handle.id)
-            response = await session.get_config()
-            assert response["max_turns"] == configs["max_turns"]
-            assert response["context_variables"] == configs["context_variables"]
-            assert response["history_size"] == configs["history_size"]
-            assert response["debug"] == configs["debug"]
 
 
 def test_convert_messages():

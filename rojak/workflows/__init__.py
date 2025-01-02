@@ -8,6 +8,7 @@ from .orchestrator_workflow import (
     OrchestratorWorkflow,
     OrchestratorBaseWorkflow,
     ShortOrchestratorWorkflow,
+    GetConfigResponse,
 )
 from .agent_workflow import (
     AgentWorkflowRunParams,
@@ -32,4 +33,5 @@ __all__ = [
     "AgentWorkflowResponse",
     "AgentWorkflow",
     "AgentTypes",
+    "GetConfigResponse",
 ]
