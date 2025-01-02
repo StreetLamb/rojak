@@ -9,7 +9,7 @@ with workflow.unsafe.imports_passed_through():
     from rojak.workflows import (
         OrchestratorWorkflow,
         OrchestratorResponse,
-        SendMessageParams,
+        SendMessagesParams,
         UpdateConfigParams,
         GetConfigResponse,
     )
@@ -19,15 +19,15 @@ class Session:
     def __init__(self, workflow_handle: WorkflowHandle):
         self.workflow_handle = workflow_handle
 
-    async def send_message(
+    async def send_messages(
         self,
-        message: ConversationMessage,
+        messages: list[ConversationMessage],
         agent: Agent,
     ) -> OrchestratorResponse:
-        """Send a message to the agent specified.
+        """Send messages to the agent specified.
 
         Args:
-            message (ConversationMessage): New query as a message object.
+            messages (list[ConversationMessage]): New query as a list of message object.
             agent (Agent): Agent to send message to.
             context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
 
@@ -35,8 +35,8 @@ class Session:
             OrchestratorResponse: A response object containing updated messages, context_variables and agent.
         """
         return await self.workflow_handle.execute_update(
-            OrchestratorWorkflow.send_message,
-            SendMessageParams(message, agent),
+            OrchestratorWorkflow.send_messages,
+            SendMessagesParams(messages, agent),
             result_type=OrchestratorResponse,
         )
 
