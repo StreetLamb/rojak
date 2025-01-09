@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 import json
+from typing import Union
 from temporalio import workflow
 from temporalio.exceptions import ActivityError
 from rojak.retrievers import Retriever
@@ -14,11 +15,22 @@ from rojak.agents import (
     AgentToolCall,
     AgentResponse,
     AgentExecuteFnResult,
-    OpenAIAgent,
-    AnthropicAgent,
 )
 
-AgentTypes = OpenAIAgent | AnthropicAgent
+
+try:
+    from rojak.agents import OpenAIAgent
+except ImportError:
+    OpenAIAgent = None
+
+try:
+    from rojak.agents import AnthropicAgent
+except ImportError:
+    AnthropicAgent = None
+
+AgentTypes = Union[
+    *(agent for agent in (OpenAIAgent, AnthropicAgent) if agent is not None)
+]
 
 
 @dataclass
