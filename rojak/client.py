@@ -17,7 +17,6 @@ with workflow.unsafe.imports_passed_through():
     from rojak.retrievers import RetrieverActivities
     from rojak.agents import Agent, AgentActivities
     from rojak.workflows import (
-        AgentWorkflow,
         OrchestratorWorkflow,
         OrchestratorParams,
         OrchestratorResponse,
@@ -57,7 +56,7 @@ class Rojak:
         worker: Worker = Worker(
             self.client,
             task_queue=self.task_queue,
-            workflows=[OrchestratorWorkflow, AgentWorkflow, ShortOrchestratorWorkflow],
+            workflows=[OrchestratorWorkflow, ShortOrchestratorWorkflow],
             activities=activities,
         )
 

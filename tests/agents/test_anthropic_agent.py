@@ -10,7 +10,7 @@ from rojak.agents import (
     AnthropicAgentOptions,
     AnthropicAgent,
 )
-from rojak.types.types import ConversationMessage
+from rojak.types.types import ConversationMessage, RetryOptions, RetryPolicy
 from rojak.workflows import OrchestratorResponse
 from tests.mock_anthropic_client import (
     MockAnthropicClient,
@@ -162,7 +162,9 @@ async def test_failed_tool_call(mock_anthropic_client: MockAnthropicClient):
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         agent = AnthropicAgent(
-            name="Test Agent", functions=["get_weather", "get_air_quality"]
+            name="Test Agent",
+            functions=["get_weather", "get_air_quality"],
+            retry_options=RetryOptions(retry_policy=RetryPolicy(maximum_attempts=5)),
         )
         anthropic_activities = AnthropicAgentActivities(
             AnthropicAgentOptions(
@@ -458,7 +460,7 @@ async def test_session_result(mock_anthropic_client: MockAnthropicClient):
             assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
 
-def test_convert_messages():
+def test_convert_messages_with_parallel_tool_calls():
     conversation_messages = [
         ConversationMessage(
             **{
@@ -492,7 +494,15 @@ def test_convert_messages():
                         },
                         "id": "toolu_01Qz54ujndhYL3cGXKY1UukD",
                         "type": "function",
-                    }
+                    },
+                    {
+                        "function": {
+                            "arguments": '{"location": "Singapore"}',
+                            "name": "get_weather",
+                        },
+                        "id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                        "type": "function",
+                    },
                 ],
             }
         ),
@@ -502,6 +512,144 @@ def test_convert_messages():
                 "role": "tool",
                 "sender": "Weather Assistant",
                 "tool_call_id": "toolu_01Qz54ujndhYL3cGXKY1UukD",
+                "tool_calls": None,
+            }
+        ),
+        ConversationMessage(
+            **{
+                "content": '{"location": "Singapore", "temperature": "65", "time": "now"}',
+                "role": "tool",
+                "sender": "Weather Assistant",
+                "tool_call_id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                "tool_calls": None,
+            }
+        ),
+    ]
+
+    assert AnthropicAgentActivities.convert_messages(conversation_messages) == (
+        [
+            {
+                "role": "user",
+                "content": "What is the weather like in Malaysia and Singapore?",
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "id": "toolu_01Qz54ujndhYL3cGXKY1UukD",
+                        "input": {"location": "Kuala Lumpur"},
+                        "name": "get_weather",
+                        "type": "tool_use",
+                    },
+                    {
+                        "id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                        "input": {"location": "Singapore"},
+                        "name": "get_weather",
+                        "type": "tool_use",
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_01Qz54ujndhYL3cGXKY1UukD",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": '{"location": "Kuala Lumpur", "temperature": "65", "time": "now"}',
+                            },
+                        ],
+                    },
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": '{"location": "Singapore", "temperature": "65", "time": "now"}',
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+        "Help provide the weather forecast.",
+    )
+
+
+def test_convert_messages_with_nonparallel_tool_call():
+    conversation_messages = [
+        ConversationMessage(
+            **{
+                "content": "Help provide the weather forecast.",
+                "role": "system",
+                "sender": None,
+                "tool_call_id": None,
+                "tool_calls": None,
+            }
+        ),
+        ConversationMessage(
+            **{
+                "content": "What is the weather like in Malaysia and Singapore?",
+                "role": "user",
+                "sender": None,
+                "tool_call_id": None,
+                "tool_calls": None,
+            }
+        ),
+        ConversationMessage(
+            **{
+                "content": "I'll help you check the weather for Malaysia",
+                "role": "assistant",
+                "sender": "Weather Assistant",
+                "tool_call_id": None,
+                "tool_calls": [
+                    {
+                        "function": {
+                            "arguments": '{"location": "Kuala Lumpur"}',
+                            "name": "get_weather",
+                        },
+                        "id": "toolu_01Qz54ujndhYL3cGXKY1UukD",
+                        "type": "function",
+                    },
+                ],
+            }
+        ),
+        ConversationMessage(
+            **{
+                "content": '{"location": "Kuala Lumpur", "temperature": "65", "time": "now"}',
+                "role": "tool",
+                "sender": "Weather Assistant",
+                "tool_call_id": "toolu_01Qz54ujndhYL3cGXKY1UukD",
+                "tool_calls": None,
+            }
+        ),
+        ConversationMessage(
+            **{
+                "content": "I'll help you check the weather for Singapore.",
+                "role": "assistant",
+                "sender": "Weather Assistant",
+                "tool_call_id": None,
+                "tool_calls": [
+                    {
+                        "function": {
+                            "arguments": '{"location": "Singapore"}',
+                            "name": "get_weather",
+                        },
+                        "id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                        "type": "function",
+                    },
+                ],
+            }
+        ),
+        ConversationMessage(
+            **{
+                "content": '{"location": "Singapore", "temperature": "65", "time": "now"}',
+                "role": "tool",
+                "sender": "Weather Assistant",
+                "tool_call_id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
                 "tool_calls": None,
             }
         ),
@@ -536,7 +684,33 @@ def test_convert_messages():
                                 "text": '{"location": "Kuala Lumpur", "temperature": "65", "time": "now"}',
                             }
                         ],
-                    }
+                    },
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                        "input": {"location": "Singapore"},
+                        "name": "get_weather",
+                        "type": "tool_use",
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_01AUvuz1d7UoUrs7SzhpCqnF",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": '{"location": "Singapore", "temperature": "65", "time": "now"}',
+                            },
+                        ],
+                    },
                 ],
             },
         ],

@@ -98,20 +98,42 @@ class AnthropicAgentActivities(AgentActivities):
     ) -> tuple[list[MessageParam], str | None]:
         """Convert messages to be Anthropic compatible.
 
-        Args:
-            messages (list[ConversationMessage]): List of messages to convert
-
-        Returns:
-            tuple[list[MessageParam], str | None ]: List of converted messages and the system message if any
+        1. System messages become the returned system string (only one).
+        2. User/assistant text messages remain single messages.
+        3. Assistant messages that contain tool calls become a single message
+        with a list of tool-use blocks.
+        4. Consecutive tool-result messages are combined into one user message,
+        where each result is a separate 'tool_result' block.
         """
         converted_messages: list[MessageParam] = []
         system_message: str | None = None
-        for message in messages:
-            # tool call
-            if message.tool_calls:
+
+        # Temporary storage for consecutive tool-result blocks
+        tool_result_buffer: list[ToolResultBlockParam] = []
+
+        def flush_tool_results():
+            # If we have accumulated any tool results,
+            # append them as a single user message and clear the buffer.
+            nonlocal tool_result_buffer
+            if tool_result_buffer:
+                converted_messages.append(
+                    MessageParam(role="user", content=tool_result_buffer)
+                )
+                tool_result_buffer = []
+
+        for msg in messages:
+            if msg.role == "system":
+                system_message = msg.content
+
+            elif msg.tool_calls:
+                # Whenever we hit an assistant message with tool calls,
+                # first flush any pending tool results (belonging to 'tool' role messages).
+                flush_tool_results()
+
+                # Convert each tool call into a tool-use block.
                 tool_blocks = []
-                for tool_call in message.tool_calls:
-                    tool_call = AgentToolCall(**tool_call)
+                for tool_call_dict in msg.tool_calls:
+                    tool_call = AgentToolCall(**tool_call_dict)
                     tool_blocks.append(
                         ToolUseBlock(
                             type="tool_use",
@@ -120,24 +142,35 @@ class AnthropicAgentActivities(AgentActivities):
                             name=tool_call.function.name,
                         ).model_dump()
                     )
+
+                # Append as a single assistant message containing multiple tool calls.
                 converted_messages.append(
                     MessageParam(role="assistant", content=tool_blocks)
                 )
-            elif message.tool_call_id:
-                content = [
+
+            elif msg.role == "tool":
+                # We accumulate tool results into a buffer until we reach a non-tool message.
+                tool_result_buffer.append(
                     ToolResultBlockParam(
                         type="tool_result",
-                        tool_use_id=message.tool_call_id,
-                        content=[TextBlockParam(type="text", text=message.content)],
+                        tool_use_id=msg.tool_call_id,
+                        content=[TextBlockParam(type="text", text=msg.content)],
                     )
-                ]
-                converted_messages.append(MessageParam(role="user", content=content))
-            elif message.role in ["user", "assistant"]:
-                converted_messages.append(
-                    MessageParam(role=message.role, content=message.content)
                 )
-            elif message.role == "system":
-                system_message = message.content
+
+            else:
+                # For normal user/assistant messages, first flush any pending tool results.
+                flush_tool_results()
+
+                # Then add this user/assistant message as-is.
+                if msg.role in ["user", "assistant"]:
+                    converted_messages.append(
+                        MessageParam(role=msg.role, content=msg.content)
+                    )
+
+        # If conversation ended with tool results, flush them.
+        flush_tool_results()
+
         return converted_messages, system_message
 
     @activity.defn(name="anthropic_call")
