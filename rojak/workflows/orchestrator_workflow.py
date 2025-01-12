@@ -1,6 +1,5 @@
 import copy
 from dataclasses import dataclass, field
-from datetime import timedelta
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ChildWorkflowError
 from rojak.types import (
@@ -118,16 +117,14 @@ class OrchestratorBaseWorkflow:
         self.context_variables = params.context_variables
 
     async def process(self, active_agent: Agent) -> Agent | None:
-        response, updated_messages = await workflow.execute_child_workflow(
-            AgentWorkflow.run,
-            AgentWorkflowRunParams(
-                agent=active_agent,
-                messages=self.messages,
-                context_variables=self.context_variables,
-                debug=self.debug,
-            ),
-            execution_timeout=timedelta(minutes=1),
+        params = AgentWorkflowRunParams(
+            agent=active_agent,
+            messages=self.messages,
+            context_variables=self.context_variables,
+            debug=self.debug,
         )
+        agent_workflow = AgentWorkflow(params)
+        response, updated_messages = await agent_workflow.run()
 
         self.messages = updated_messages
 

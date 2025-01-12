@@ -10,6 +10,7 @@ from rojak.agents import (
     AgentExecuteFnResult,
     AgentInstructionOptions,
 )
+from rojak.types.types import RetryOptions, RetryPolicy
 from rojak.workflows import OrchestratorResponse
 from tests.mock_client import MockOpenAIClient, create_mock_response
 
@@ -155,7 +156,9 @@ async def test_failed_tool_call(mock_openai_client: MockOpenAIClient):
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         agent = OpenAIAgent(
-            name="Test Agent", functions=["get_weather", "get_air_quality"]
+            name="Test Agent",
+            functions=["get_weather", "get_air_quality"],
+            retry_options=RetryOptions(retry_policy=RetryPolicy(maximum_attempts=5)),
         )
         openai_activities = OpenAIAgentActivities(
             OpenAIAgentOptions(

@@ -15,6 +15,7 @@ from rojak.agents import (
     AgentToolCall,
     AgentResponse,
     AgentExecuteFnResult,
+    Agent,
 )
 
 
@@ -28,9 +29,10 @@ try:
 except ImportError:
     AnthropicAgent = None
 
-AgentTypes = Union[
-    *(agent for agent in (OpenAIAgent, AnthropicAgent) if agent is not None)
-]
+AgentTypes = (
+    Union[*(agent for agent in (OpenAIAgent, AnthropicAgent) if agent is not None)]
+    | Agent  # typing fallback
+)
 
 
 @dataclass
@@ -66,33 +68,27 @@ class AgentWorkflowResponse:
     """Indicate which agent the message originated from."""
 
 
-@workflow.defn
 class AgentWorkflow:
-    @workflow.init
     def __init__(self, params: AgentWorkflowRunParams):
         self.agent = params.agent
-
-        self.retry_policy = create_retry_policy(params.agent.retry_options.retry_policy)
+        self.retry_policy = create_retry_policy(self.agent.retry_options.retry_policy)
         self.start_to_close_timeout = timedelta(
             seconds=params.agent.retry_options.timeout_in_seconds
         )
         self.debug = params.debug
+        self.messages = params.messages
+        self.context_variables = params.context_variables
 
-    @workflow.run
-    async def run(
-        self, params: AgentWorkflowRunParams
-    ) -> tuple[AgentWorkflowResponse, list[ConversationMessage]]:
+    async def run(self) -> tuple[AgentWorkflowResponse, list[ConversationMessage]]:
         # process instructions
-        context_variables = params.context_variables
-        instructions = params.agent.instructions
-
+        instructions = self.agent.instructions
         try:
             if isinstance(instructions, AgentInstructionOptions):
                 instructions: str = await workflow.execute_activity(
-                    f"{params.agent.type}_execute_instructions",
+                    f"{self.agent.type}_execute_instructions",
                     ExecuteInstructionsParams(
                         instructions,
-                        context_variables,
+                        self.context_variables,
                     ),
                     result_type=str,
                     start_to_close_timeout=self.start_to_close_timeout,
@@ -104,21 +100,21 @@ class AgentWorkflow:
 
         # augment instructions
         if isinstance(self.agent.retriever, Retriever):
-            context_prompt = await self.retrieve_context(params.messages[-1])
+            context_prompt = await self.retrieve_context(self.messages[-1])
             instructions += context_prompt
 
         # execute call model activity
         response: AgentResponse = await workflow.execute_activity(
-            f"{params.agent.type}_call",
+            f"{self.agent.type}_call",
             AgentCallParams(
                 messages=[
                     ConversationMessage(role="system", content=instructions),
-                    *params.messages,
+                    *self.messages,
                 ],
-                model=params.agent.model,
-                function_names=params.agent.functions,
-                parallel_tool_calls=params.agent.parallel_tool_calls,
-                tool_choice=params.agent.tool_choice,
+                model=self.agent.model,
+                function_names=self.agent.functions,
+                parallel_tool_calls=self.agent.parallel_tool_calls,
+                tool_choice=self.agent.tool_choice,
             ),
             result_type=AgentResponse,
             start_to_close_timeout=self.start_to_close_timeout,
@@ -128,24 +124,22 @@ class AgentWorkflow:
         # dont use isinstance to check as response output type different for different llm providers
         if response.type == "tool":
             tool_calls = response.tool_calls
-            params.messages.append(
+            self.messages.append(
                 ConversationMessage(
                     role="assistant",
                     content=response.content,
                     tool_calls=tool_calls,
-                    sender=params.agent.name,
+                    sender=self.agent.name,
                 ),
             )
-            debug_print(
-                self.debug, workflow.now(), f"{params.agent.name}: {tool_calls}"
-            )
+            debug_print(self.debug, workflow.now(), f"{self.agent.name}: {tool_calls}")
 
             # TODO: Figure out how to handle concurrent tool calls without race conditions in context_variables
             results: list[AgentWorkflowResponse] = []
             for tool_call in tool_calls:
-                result = await self.handle_tool_call(tool_call, context_variables)
+                result = await self.handle_tool_call(tool_call, self.context_variables)
                 assert isinstance(result.output, ToolResponse)
-                context_variables = result.output.output.context_variables
+                self.context_variables = result.output.output.context_variables
                 results.append(result)
 
             final_result: AgentWorkflowResponse | None = None
@@ -155,13 +149,13 @@ class AgentWorkflow:
                 debug_print(
                     self.debug,
                     workflow.now(),
-                    f"{params.agent.name}: {fn_result.output}",
+                    f"{self.agent.name}: {fn_result.output}",
                 )
-                params.messages.append(
+                self.messages.append(
                     ConversationMessage(
                         role="tool",
                         content=fn_result.output,
-                        sender=params.agent.name,
+                        sender=self.agent.name,
                         tool_call_id=result.output.tool_call_id,
                     )
                 )
@@ -176,21 +170,21 @@ class AgentWorkflow:
 
         else:
             assert isinstance(response.content, str)
-            params.messages.append(
+            self.messages.append(
                 ConversationMessage(
                     role="assistant",
                     content=response.content,
-                    sender=params.agent.name,
+                    sender=self.agent.name,
                 )
             )
             debug_print(
-                self.debug, workflow.now(), f"{params.agent.name}: {response.content}"
+                self.debug, workflow.now(), f"{self.agent.name}: {response.content}"
             )
             final_result = AgentWorkflowResponse(
-                output=response.content, sender=params.agent.name
+                output=response.content, sender=self.agent.name
             )
 
-        return final_result, params.messages
+        return final_result, self.messages
 
     async def retrieve_context(self, message: ConversationMessage) -> str:
         try:
@@ -217,6 +211,10 @@ class AgentWorkflow:
         tool_call: AgentToolCall,
         context_variables: ContextVariables,
     ) -> AgentWorkflowResponse:
+        """
+        Handles a tool call, checks for interrupts before and after execution,
+        and handles approval/rejection.
+        """
         name = tool_call.function.name
         args = json.loads(tool_call.function.arguments)
         try:
