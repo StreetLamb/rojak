@@ -15,6 +15,7 @@ from rojak.agents import (
     AgentToolCall,
     AgentResponse,
     AgentExecuteFnResult,
+    Agent,
 )
 
 
@@ -28,9 +29,10 @@ try:
 except ImportError:
     AnthropicAgent = None
 
-AgentTypes = Union[
-    *(agent for agent in (OpenAIAgent, AnthropicAgent) if agent is not None)
-]
+AgentTypes = (
+    Union[*(agent for agent in (OpenAIAgent, AnthropicAgent) if agent is not None)]
+    | Agent  # typing fallback
+)
 
 
 @dataclass
