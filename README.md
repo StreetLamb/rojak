@@ -2,7 +2,7 @@
 
 Open-source framework for building highly durable and scalable multi-agent orchestrations.
 
-![Rojak Demo](https://i.imgur.com/TaFDIaT.gif)
+https://github.com/user-attachments/assets/74a2f0be-2021-40a6-a43b-db001fb95dbb
 
 ## Features
 - 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
