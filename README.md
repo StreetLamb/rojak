@@ -4,8 +4,9 @@ Open-source framework for building highly durable and scalable multi-agent orche
 
 ## Features
 - 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
-- 📈 **Scalable** - Manage unlimited agents, and handle multiple chat sessions in parallel.
 - 🗂️ **State Management** - Messages, contexts and other states are automatically managed and preserved, even during failures. No complex database transactions required.
+- 🤝 **MCP Support** - Supports calling tools via Model Context Protocol (MCP) servers.
+- 📈 **Scalable** - Manage unlimited agents, and handle multiple chat sessions in parallel.
 - ⏰ **Scheduling** - Schedule to run your agents at specific times, days, date or intervals.
 - 👁️ **Visiblity** - Track your agents’ past and current actions in real time through a user-friendly browser-based UI.
 - 🌐 **Universal Deployment** - Deploy and run locally or on any cloud platform.
@@ -19,17 +20,17 @@ pip install rojak
 
 Install dependencies for the specific model providers you need:
 ```shell
-# For OpenAI models
+# For OpenAI models or models supporting OpenAI format e.g. DeepSeek, Ollama.
 pip install rojak[openai]
 
-# For Anthropic models
+# For Anthropic and Anthropic Bedrock models.
 pip install rojak[anthropic]
 
-# For both OpenAI and Anthropic models
+# To install both
 pip install rojak[openai,anthropic]
 ```
 
-Rojak also supports retrievers. Install the dependencies as required:
+Rojak also supports retrievers to retrieve context from vector stores. Install the dependencies if required:
 ```shell
 # For Qdrant
 pip install rojak[qdrant-client]
@@ -37,25 +38,28 @@ pip install rojak[qdrant-client]
 
 ## Usage
 
+```shell
+temporal server start-dev
+```
 
 ```python
+# main.py
+
 import asyncio
 from temporalio.client import Client
 from rojak import Rojak
 from rojak.agents import OpenAIAgentActivities, OpenAIAgentOptions, OpenAIAgent
 
-# Function to transfer control to Agent B
 def transfer_to_agent_b():
+    """Handoff to Agent B"""
     return agent_b
 
-# Define Agent A
 agent_a = OpenAIAgent(
     name="Agent A",
     instructions="You are a helpful agent.",
     functions=["transfer_to_agent_b"]
 )
 
-# Define Agent B
 agent_b = OpenAIAgent(
     name="Agent B",
     instructions="Only speak in Haikus."
@@ -72,23 +76,19 @@ async def main():
     # Configure agent activities
     openai_activities = OpenAIAgentActivities(
         OpenAIAgentOptions(
-            api_key="YOUR_API_KEY_HERE",  # Replace with your OpenAI API key
+            # Replace with your OpenAI API key or specify OPENAI_API_KEY in .env 
+            api_key="YOUR_API_KEY_HERE",
             all_functions=[transfer_to_agent_b]
         )
     )
 
-    # Create the worker
     worker = await rojak.create_worker(agent_activities=[openai_activities])
-
     async with worker:
-        # Run the multi-agent workflow
         response = await rojak.run(
             id="unique-id",
             agent=agent_a,
             messages=[{"role": "user", "content": "I want to talk to agent B."}]
         )
-
-        # Print agent's response
         print(response.messages[-1].content)
 
 if __name__ == "__main__":
@@ -136,6 +136,7 @@ What do you wish for?
     - [`rojak.create_schedule()`](#rojakcreate_schedule)
       - [Arguments](#arguments-4)
     - [`rojak.list_scheduled_runs()`](#rojaklist_scheduled_runs)
+  - [Model Context Protocol (MCP) Servers](#model-context-protocol-mcp-servers)
 
 # Overview
 
@@ -151,21 +152,20 @@ Much like OpenAI’s Swarm, Rojak employs two key concepts:
 Basic examples can be found in the `/examples` directory:
 
 - [`weather`](examples/weather/): A straightforward example demonstrating tool calling and the use of `context_variables`.
+- [`mcp_weather`](examples/mcp_weather/) An example demostrating connecting to MCP servers and executing tools through them.
 
 
 # Understanding Rojak’s Architecture
 
 ![Rojak Diagram](assets/rojak_diagram.png)
 
-Rojak is built on Temporal workflows and activities, structured into two main workflow types: the **Orchestrator Workflow** and the **Agent Workflow**.
+Rojak is built on Temporal workflows and activities, and orchestrates agents via the **Orchestrator Workflow**.
 
-- The **Orchestrator Workflow** is responsible for receiving the user’s query, executing the Agent Workflow, and passing along the user query and relevant agent information.
-
-- The **Agent Workflow** handles tasks such as retrieving a response from the LLM model and executing tools or functions. These tasks, referred to as **Activities**, are the discrete units of work within the workflow.
+- The **Orchestrator Workflow** is responsible for receiving the user’s query, managing the overall execution process, and orchestrating tasks such as retrieving responses from LLM models, executing tools or functions, and handling any necessary Activities.
 
 **Activities** are method functions grouped by class, with each class representing actions for a specific provider. Base classes like `AgentActivities` and `RetrieverActivities` serve as templates, while concrete classes, such as `OpenAIAgentActivities` for OpenAI and `QdrantRetrieverActivities` for Qdrant Vector DB, implement provider-specific methods. This design ensures flexibility and seamless integration with various providers.
 
-After completing its tasks, the Agent Workflow generates a result containing the agent’s response and the next agent (if any) to hand off to. This result is passed back to the Orchestrator Workflow, which then continues the process by executing the Agent Workflow for the specified agent in the result.
+After completing its tasks, the Orchestrator Workflow generates a result containing the agent’s response and the next agent (if any) to hand off to. This result is passed back to the Orchestrator Workflow, which then continues the process by executing the specified agent in the result.
 
 Every step in the workflows is tracked and recorded in the **Temporal Service**, which, in the event of failures, allows the workflow to resume from the previous step. This ensures that workflows are durable, reliable, and recoverable.
 
@@ -712,4 +712,54 @@ async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Compl
 
 ```
 Hello! How can I assist you today?
+```
+
+## Model Context Protocol (MCP) Servers
+
+MCP is an open protocol that standardises how applications provide context to LLMs, similar to how USB-C standardises device connections. It enables a consistent way to connect AI models to various data sources and tools.
+
+To connect to MCP servers, specify the servers you want to connect to using `MCPServerConfig`. Rojak supports two types of communication with MCP servers:
+- **Server-Sent Events (SSE)**: For receiving real-time updates via HTTP.
+- **Standard Input/Output (stdio)**: For local processes.
+
+Below is an example demonstrating how to configure MCP servers and handle requests:
+```python
+# For full code see examples/mcp_weather/main.py
+
+from rojak.types import MCPServerConfig
+
+# ...Skipping initial setup
+
+worker = await rojak.create_worker(
+    [openai_activities],
+    mcp_servers={
+        "weather": MCPServerConfig(
+            type="stdio", 
+            command="python", 
+            args=["mcp_weather_server.py"]
+        ),
+        # "example_server": MCPServerConfig(
+        #     type="sse", 
+        #     url="http://localhost:8000/sse"
+        # )
+    },
+)
+
+try:
+    async with worker:
+        response = await rojak.run(
+            id=str(uuid.uuid4()),
+            agent=agent,
+            messages=[
+                {
+                    "role": "user",
+                    "content": "What is the weather like in San Francisco?",
+                }
+            ],
+            debug=True,
+        )
+        print(response.messages[-1].content)
+finally:
+    # Clean up MCP resources
+    await rojak.cleanup_mcp()
 ```
