@@ -1,5 +1,10 @@
 from dataclasses import dataclass
 from typing import Any, Literal, Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rojak.mcp.mcp_client import MCPClient
+    from mcp import Tool
 
 
 @dataclass
@@ -97,3 +102,17 @@ class MCPServerConfig:
 
     url: str | None = None
     """(For `websocket` or `sse` type) The URL to connect to the MCP server."""
+
+
+@dataclass
+class InitMcpResult:
+    """Result from initialising MCP servers"""
+
+    clients: dict[str, "MCPClient"]
+    """A dictionary mapping server names to their corresponding `MCPClient` instances."""
+
+    tools: dict[str, "Tool"]
+    """A dictionary mapping tool names to `Tool` instances registered with the MCP servers."""
+
+    tool_client_mapping: dict[str, str]
+    """A dictionary mapping tool names to the corresponding MCP server names."""

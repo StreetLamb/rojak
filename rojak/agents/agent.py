@@ -1,17 +1,16 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
-from rojak.mcp import MCPClient
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent
 from rojak.retrievers import Retriever
 from rojak.types import (
     ContextVariables,
     ConversationMessage,
     RetryOptions,
+    MCPServerConfig,
+    InitMcpResult,
 )
 from temporalio.exceptions import ApplicationError
-
-from rojak.types.types import MCPServerConfig
 
 AgentFunction = Callable[[], str]
 
@@ -182,33 +181,11 @@ class AgentActivities(ABC):
 
     def __init__(self, options: AgentOptions):
         self.function_map = {f.__name__: f for f in options.all_functions}
+        self.mcp_result: InitMcpResult | None = None
 
-        # Handle MCP servers
-        self.connections: dict[str, tuple[MCPClient | list[Tool]]] = {}
-        self.mcp_clients: dict[str, MCPClient] = {}
-        self.mcp_tools: dict[str, Tool] = {}
-        self.tool_client_mapping: dict[str, str] = {}
-
-    @classmethod
-    async def create(cls, options: AgentOptions) -> "AgentActivities":
-        """Asynchronous factory method to initialize the agent."""
-        self = cls(options)
-        for server_name, config in options.mcp_servers.items():
-            try:
-                mcp_client = MCPClient()
-                await mcp_client.connect_to_server(config)
-                list_tools_result = await mcp_client.session.list_tools()
-                self.mcp_clients[server_name] = mcp_client
-                for tool in list_tools_result.tools:
-                    self.mcp_tools[tool.name] = {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.inputSchema,
-                    }
-                    self.tool_client_mapping[tool.name] = server_name
-            except Exception as e:
-                print(f"Unable to connect to MCP server. Skipping. Error: {e}")
-        return self
+    def _add_mcp_configs(self, mcp_result: InitMcpResult):
+        """Add MCP configurations"""
+        self.mcp_result = mcp_result
 
     @abstractmethod
     async def call(self, params: AgentCallParams) -> AgentResponse:
@@ -281,6 +258,29 @@ class AgentActivities(ABC):
                         f"Unknown function result type: {type(result)}. Error: {str(e)}"
                     )
 
+    @staticmethod
+    async def execute_mcp_tool(
+        mcp_result: InitMcpResult, tool_name: str, args: dict
+    ) -> str:
+        """Get tool response from MCP server
+
+        Args:
+            mcp_result (InitMcpResult): The result from initialising MCP servers.
+            tool_name (str): Name of the tool.
+            args (dict): Tool arguments.
+
+        Returns:
+            str: The tool response.
+        """
+        server_name = mcp_result.tool_client_mapping[tool_name]
+        client = mcp_result.clients[server_name]
+        response = await client.session.call_tool(tool_name, args)
+        texts = []
+        for content in response.content:
+            if isinstance(content, TextContent):
+                texts.append(content.text)
+        return "\n".join(texts)
+
     @abstractmethod
     async def execute_function(
         self, params: ExecuteFunctionParams
@@ -303,14 +303,10 @@ class AgentActivities(ABC):
                 params.args["context_variables"] = params.context_variables
 
             result = fn(**params.args)
-        elif params.name in self.mcp_tools:
-            server_name = self.tool_client_mapping[params.name]
-            client = self.mcp_clients[server_name]
-            response = await client.session.call_tool(params.name, params.args)
-            result = ""
-            for content in response.content:
-                if isinstance(content, TextContent):
-                    result += f"{content}\n"
+        elif self.mcp_result and params.name in self.mcp_result.tools:
+            result = await self.execute_mcp_tool(
+                self.mcp_result, params.name, params.args
+            )
         else:
             raise ApplicationError(
                 f"Function {params.name} not found",
