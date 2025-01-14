@@ -2,6 +2,8 @@
 
 Open-source framework for building highly durable and scalable multi-agent orchestrations.
 
+See it in action:
+
 https://github.com/user-attachments/assets/74a2f0be-2021-40a6-a43b-db001fb95dbb
 
 ## Features
