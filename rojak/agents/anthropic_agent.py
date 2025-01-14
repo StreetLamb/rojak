@@ -195,6 +195,9 @@ class AnthropicAgentActivities(AgentActivities):
             if "context_variables" in required_list:
                 required_list.remove("context_variables")
 
+        tools += list(self.mcp_tools.values())
+        print("test_tools", tools)
+
         response: Message = self.client.messages.create(
             model=params.model,
             messages=messages,

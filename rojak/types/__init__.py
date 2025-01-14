@@ -3,6 +3,13 @@ from .types import (
     ConversationMessage,
     RetryPolicy,
     RetryOptions,
+    MCPServerConfig,
 )
 
-__all__ = ["ContextVariables", "ConversationMessage", "RetryPolicy", "RetryOptions"]
+__all__ = [
+    "ContextVariables",
+    "ConversationMessage",
+    "RetryPolicy",
+    "RetryOptions",
+    "MCPServerConfig",
+]

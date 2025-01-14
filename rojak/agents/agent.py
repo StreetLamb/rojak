@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
+from rojak.mcp import MCPClient
+from mcp.types import Tool, TextContent
 from rojak.retrievers import Retriever
 from rojak.types import (
     ContextVariables,
@@ -9,6 +11,8 @@ from rojak.types import (
 )
 from temporalio.exceptions import ApplicationError
 
+from rojak.types.types import MCPServerConfig
+
 AgentFunction = Callable[[], str]
 
 
@@ -16,6 +20,9 @@ AgentFunction = Callable[[], str]
 class AgentOptions:
     all_functions: list[AgentFunction] = field(default_factory=list)
     """List of functions that an agent can execute."""
+
+    mcp_servers: dict[str, MCPServerConfig] = field(default_factory=dict)
+    """List of MCP servers to connect to."""
 
 
 @dataclass
@@ -176,6 +183,33 @@ class AgentActivities(ABC):
     def __init__(self, options: AgentOptions):
         self.function_map = {f.__name__: f for f in options.all_functions}
 
+        # Handle MCP servers
+        self.connections: dict[str, tuple[MCPClient | list[Tool]]] = {}
+        self.mcp_clients: dict[str, MCPClient] = {}
+        self.mcp_tools: dict[str, Tool] = {}
+        self.tool_client_mapping: dict[str, str] = {}
+
+    @classmethod
+    async def create(cls, options: AgentOptions) -> "AgentActivities":
+        """Asynchronous factory method to initialize the agent."""
+        self = cls(options)
+        for server_name, config in options.mcp_servers.items():
+            try:
+                mcp_client = MCPClient()
+                await mcp_client.connect_to_server(config)
+                list_tools_result = await mcp_client.session.list_tools()
+                self.mcp_clients[server_name] = mcp_client
+                for tool in list_tools_result.tools:
+                    self.mcp_tools[tool.name] = {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.inputSchema,
+                    }
+                    self.tool_client_mapping[tool.name] = server_name
+            except Exception as e:
+                print(f"Unable to connect to MCP server. Skipping. Error: {e}")
+        return self
+
     @abstractmethod
     async def call(self, params: AgentCallParams) -> AgentResponse:
         """Generate response from the LLM model.
@@ -262,18 +296,26 @@ class AgentActivities(ABC):
         Returns:
             str | Agent | AgentExecuteFnResult: Response from the tool call function.
         """
-        if params.name not in self.function_map:
+        if params.name in self.function_map:
+            fn = self.function_map[params.name]
+
+            if "context_variables" in fn.__code__.co_varnames:
+                params.args["context_variables"] = params.context_variables
+
+            result = fn(**params.args)
+        elif params.name in self.mcp_tools:
+            server_name = self.tool_client_mapping[params.name]
+            client = self.mcp_clients[server_name]
+            response = await client.session.call_tool(params.name, params.args)
+            result = ""
+            for content in response.content:
+                if isinstance(content, TextContent):
+                    result += f"{content}\n"
+        else:
             raise ApplicationError(
                 f"Function {params.name} not found",
                 type="FunctionNotFound",
                 non_retryable=True,
             )
-
-        fn = self.function_map[params.name]
-
-        if "context_variables" in fn.__code__.co_varnames:
-            params.args["context_variables"] = params.context_variables
-
-        result = fn(**params.args)
 
         return self.handle_function_result(result, params.context_variables)

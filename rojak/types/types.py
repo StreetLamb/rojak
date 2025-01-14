@@ -80,3 +80,20 @@ class RetryOptions:
     def __post_init__(self):
         if self.timeout_in_seconds < 1:
             raise ValueError("Timeout cannot be less than one second")
+
+
+@dataclass
+class MCPServerConfig:
+    """Configuration options for the MCP server"""
+
+    type: Literal["sse", "stdio"]
+    """Connection type to MCP server."""
+
+    command: str | None = None
+    """(For `stdio` type) The command or executable to run to start the MCP server."""
+
+    args: list[str] | None = None
+    """(For `stdio` type) Command line arguments to pass to the `command`."""
+
+    url: str | None = None
+    """(For `websocket` or `sse` type) The URL to connect to the MCP server."""

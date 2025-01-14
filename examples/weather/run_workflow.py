@@ -31,7 +31,7 @@ async def main() -> None:
         messages=[
             {
                 "role": "user",
-                "content": "What is the weather like in Malaysia and Singapore?",
+                "content": "What is the weather like in Malaysia and Singapore? Send an email to john@example.com",
             }
         ],
         agent=weather_agent,
