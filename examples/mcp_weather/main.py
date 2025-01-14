@@ -1,9 +1,9 @@
 import asyncio
 import uuid
 from temporalio.client import Client
-from rojak.agents.openai_agent import OpenAIAgent, OpenAIAgentActivities
+from rojak.agents import OpenAIAgent, OpenAIAgentActivities
 from rojak.client import Rojak
-from rojak.types.types import MCPServerConfig, RetryOptions, RetryPolicy
+from rojak.types import MCPServerConfig, RetryOptions, RetryPolicy
 
 
 async def main():
