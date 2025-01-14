@@ -44,7 +44,7 @@ class OpenAIAgent(Agent):
 
 
 class OpenAIAgentActivities(AgentActivities):
-    def __init__(self, options: OpenAIAgentOptions | None = OpenAIAgentOptions()):
+    def __init__(self, options: OpenAIAgentOptions = OpenAIAgentOptions()):
         super().__init__(options)
 
         if options.client:

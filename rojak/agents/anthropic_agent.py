@@ -54,7 +54,7 @@ class AnthropicAgent(Agent):
 
 
 class AnthropicAgentActivities(AgentActivities):
-    def __init__(self, options: AnthropicAgentOptions | None = AnthropicAgentOptions()):
+    def __init__(self, options: AnthropicAgentOptions = AnthropicAgentOptions()):
         super().__init__(options)
 
         if options.client:
