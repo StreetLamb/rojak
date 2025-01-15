@@ -25,7 +25,7 @@ from rojak.agents.agent import (
     ToolCallFunction,
 )
 from rojak.types.types import ConversationMessage
-from rojak.utils.helpers import function_to_json_anthropic
+from rojak.utils import function_to_json_anthropic, mcp_to_anthropic_tool
 
 
 @dataclass
@@ -54,7 +54,7 @@ class AnthropicAgent(Agent):
 
 
 class AnthropicAgentActivities(AgentActivities):
-    def __init__(self, options: AnthropicAgentOptions):
+    def __init__(self, options: AnthropicAgentOptions = AnthropicAgentOptions()):
         super().__init__(options)
 
         if options.client:
@@ -194,6 +194,10 @@ class AnthropicAgentActivities(AgentActivities):
             required_list = tool["input_schema"]["required"]
             if "context_variables" in required_list:
                 required_list.remove("context_variables")
+
+        tools += [
+            mcp_to_anthropic_tool(tool) for tool in self.mcp_result.tools.values()
+        ]
 
         response: Message = self.client.messages.create(
             model=params.model,

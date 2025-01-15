@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 from openai import NotGiven, OpenAI
 from temporalio import activity
-from rojak.utils import function_to_json
+from rojak.utils import function_to_json, mcp_to_openai_tool
 from rojak.agents import (
     Agent,
     AgentActivities,
@@ -44,7 +44,7 @@ class OpenAIAgent(Agent):
 
 
 class OpenAIAgentActivities(AgentActivities):
-    def __init__(self, options: OpenAIAgentOptions):
+    def __init__(self, options: OpenAIAgentOptions = OpenAIAgentOptions()):
         super().__init__(options)
 
         if options.client:
@@ -105,6 +105,8 @@ class OpenAIAgentActivities(AgentActivities):
             fn_params["properties"].pop("context_variables", None)
             if "context_variables" in fn_params["required"]:
                 fn_params["required"].remove("context_variables")
+
+        tools += [mcp_to_openai_tool(tool) for tool in self.mcp_result.tools.values()]
 
         response = self.client.chat.completions.create(
             model=params.model,

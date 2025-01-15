@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import inspect
 from rojak.types import RetryPolicy
 from temporalio.common import RetryPolicy as TRetryPolicy
+from mcp import Tool
 
 
 def function_to_json(func) -> dict:
@@ -120,6 +121,41 @@ def function_to_json_anthropic(func) -> dict:
             "properties": parameters,
             "required": required,
         },
+    }
+
+
+def mcp_to_openai_tool(tool: Tool) -> dict[str, any]:
+    """Convert MCP tool to openai format.
+
+    Args:
+        tool (Tool): MCP Tool object.
+
+    Returns:
+        dict[str, any]: A dictionary representing tool in JSON format.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.inputSchema,
+        },
+    }
+
+
+def mcp_to_anthropic_tool(tool: Tool) -> dict[str, any]:
+    """Convert MCP tool to anthropic format
+
+    Args:
+        tool (Tool): MCP Tool object
+
+    Returns:
+        dict[str, any]: A dictionary representing tool in JSON format.
+    """
+    return {
+        "name": tool.name,
+        "description": tool.description,
+        "input_schema": tool.inputSchema,
     }
 
 

@@ -1,11 +1,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
+from mcp.types import TextContent
 from rojak.retrievers import Retriever
 from rojak.types import (
     ContextVariables,
     ConversationMessage,
     RetryOptions,
+    MCPServerConfig,
+    InitMcpResult,
 )
 from temporalio.exceptions import ApplicationError
 
@@ -16,6 +19,9 @@ AgentFunction = Callable[[], str]
 class AgentOptions:
     all_functions: list[AgentFunction] = field(default_factory=list)
     """List of functions that an agent can execute."""
+
+    mcp_servers: dict[str, MCPServerConfig] = field(default_factory=dict)
+    """List of MCP servers to connect to."""
 
 
 @dataclass
@@ -175,6 +181,11 @@ class AgentActivities(ABC):
 
     def __init__(self, options: AgentOptions):
         self.function_map = {f.__name__: f for f in options.all_functions}
+        self.mcp_result: InitMcpResult | None = None
+
+    def _add_mcp_configs(self, mcp_result: InitMcpResult):
+        """Add MCP configurations"""
+        self.mcp_result = mcp_result
 
     @abstractmethod
     async def call(self, params: AgentCallParams) -> AgentResponse:
@@ -247,6 +258,29 @@ class AgentActivities(ABC):
                         f"Unknown function result type: {type(result)}. Error: {str(e)}"
                     )
 
+    @staticmethod
+    async def execute_mcp_tool(
+        mcp_result: InitMcpResult, tool_name: str, args: dict
+    ) -> str:
+        """Get tool response from MCP server
+
+        Args:
+            mcp_result (InitMcpResult): The result from initialising MCP servers.
+            tool_name (str): Name of the tool.
+            args (dict): Tool arguments.
+
+        Returns:
+            str: The tool response.
+        """
+        server_name = mcp_result.tool_client_mapping[tool_name]
+        client = mcp_result.clients[server_name]
+        response = await client.session.call_tool(tool_name, args)
+        texts = []
+        for content in response.content:
+            if isinstance(content, TextContent):
+                texts.append(content.text)
+        return "\n".join(texts)
+
     @abstractmethod
     async def execute_function(
         self, params: ExecuteFunctionParams
@@ -262,18 +296,22 @@ class AgentActivities(ABC):
         Returns:
             str | Agent | AgentExecuteFnResult: Response from the tool call function.
         """
-        if params.name not in self.function_map:
+        if params.name in self.function_map:
+            fn = self.function_map[params.name]
+
+            if "context_variables" in fn.__code__.co_varnames:
+                params.args["context_variables"] = params.context_variables
+
+            result = fn(**params.args)
+        elif self.mcp_result and params.name in self.mcp_result.tools:
+            result = await self.execute_mcp_tool(
+                self.mcp_result, params.name, params.args
+            )
+        else:
             raise ApplicationError(
                 f"Function {params.name} not found",
                 type="FunctionNotFound",
                 non_retryable=True,
             )
-
-        fn = self.function_map[params.name]
-
-        if "context_variables" in fn.__code__.co_varnames:
-            params.args["context_variables"] = params.context_variables
-
-        result = fn(**params.args)
 
         return self.handle_function_result(result, params.context_variables)

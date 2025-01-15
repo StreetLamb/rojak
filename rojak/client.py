@@ -10,12 +10,14 @@ from temporalio.client import (
 from temporalio import workflow
 from temporalio.worker import Worker
 from temporalio.exceptions import WorkflowAlreadyStartedError
-from rojak.types import ConversationMessage
+from rojak.types import ConversationMessage, MCPServerConfig, InitMcpResult
 from rojak.session import Session
 
 with workflow.unsafe.imports_passed_through():
+    from mcp import Tool
     from rojak.retrievers import RetrieverActivities
     from rojak.agents import Agent, AgentActivities
+    from rojak.mcp.mcp_client import MCPClient
     from rojak.workflows import (
         OrchestratorWorkflow,
         OrchestratorParams,
@@ -29,23 +31,60 @@ class Rojak:
     def __init__(self, client: Client, task_queue: str):
         self.client: Client = client
         self.task_queue: str = task_queue
+        self.mcp_result: InitMcpResult | None = None
+
+    async def _init_mcp(self, servers: dict[str, MCPServerConfig]) -> None:
+        """Initialise MCP servers.
+
+        Args:
+            servers (dict[str, MCPServerConfig]): List of MCP servers.
+
+        Returns:
+            tuple[dict[str, MCPClient], dict[str, Tool], dict[str, str]]: Response as tuple.
+        """
+        mcp_clients: dict[str, MCPClient] = {}
+        mcp_tools: dict[str, Tool] = {}
+        tool_client_mapping: dict[str, str] = {}
+        for server_name, config in servers.items():
+            try:
+                mcp_client = MCPClient()
+                await mcp_client.connect_to_server(config)
+                list_tools_result = await mcp_client.session.list_tools()
+                mcp_clients[server_name] = mcp_client
+                for tool in list_tools_result.tools:
+                    mcp_tools[tool.name] = tool
+                    tool_client_mapping[tool.name] = server_name
+            except Exception as e:
+                print(f"Unable to connect to MCP server. Skipping. Error: {e}")
+        self.mcp_result = InitMcpResult(mcp_clients, mcp_tools, tool_client_mapping)
+        print(f"MCP tools loaded: {list(mcp_tools.keys())}")
+
+    async def cleanup_mcp(self):
+        """Cleanup MCP connections."""
+        for client in list(self.mcp_result.clients.values())[::-1]:
+            await client.cleanup()
 
     async def create_worker(
         self,
         agent_activities: list[AgentActivities],
         retriever_activities: list[RetrieverActivities] = [],
+        mcp_servers: dict[str, MCPServerConfig] = {},
     ) -> Worker:
         """Create a worker.
 
         Args:
             agent_activities (list[AgentActivities]): List of activity classes that can be called.
             retriever_activities (list[RetrieverActivities], optional): List of retriever activity classes that can be called. Defaults to [].
+            mcp_servers (dict[str, MCPServerConfig], optional): Dictionary of MCP server configurations. Each key represents the server name, and the value is its corresponding MCPServerConfig object. Defaults to {}.
 
         Returns:
             Worker: A worker object that can be used to start the worker.
         """
+        await self._init_mcp(mcp_servers)
         activities = []
         for activity in agent_activities:
+            if self.mcp_result:
+                activity._add_mcp_configs(self.mcp_result)
             activities.append(activity.call)
             activities.append(activity.execute_function)
             activities.append(activity.execute_instructions)
