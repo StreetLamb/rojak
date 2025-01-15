@@ -57,7 +57,8 @@ class Rojak:
             except Exception as e:
                 print(f"Unable to connect to MCP server. Skipping. Error: {e}")
         self.mcp_result = InitMcpResult(mcp_clients, mcp_tools, tool_client_mapping)
-        print(f"MCP tools loaded: {list(mcp_tools.keys())}")
+        if mcp_tools:
+            print(f"MCP tools loaded: {list(mcp_tools.keys())}")
 
     async def cleanup_mcp(self):
         """Cleanup MCP connections."""
