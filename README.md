@@ -10,7 +10,7 @@
 
 See it in action:
 
-https://github.com/user-attachments/assets/25e6aa4d-edd7-4948-bd85-c9c6dd158fa4
+https://github.com/user-attachments/assets/d61b8893-3c33-4002-bca9-740f403f51f1
 
 ## Features
 - 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
