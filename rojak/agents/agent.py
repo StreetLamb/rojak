@@ -90,6 +90,9 @@ class AgentToolCall:
     type: str = "function"
     """The type of the tool."""
 
+    index: int | None = None
+    """Identifies which function call the delta is for."""
+
     def __post_init__(self):
         if isinstance(self.function, dict):
             self.function = ToolCallFunction(**self.function)

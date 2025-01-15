@@ -22,6 +22,7 @@ import os
 class OpenAIAgentOptions(AgentOptions):
     api_key: str | None = None
     client: OpenAI | None = None
+    base_url: str | None = None
     inference_config: dict[str, Any] = field(
         default_factory=lambda: {
             "max_tokens": 1000,
@@ -50,12 +51,13 @@ class OpenAIAgentActivities(AgentActivities):
         if options.client:
             self.client = options.client
         elif options.api_key:
-            self.client = OpenAI(api_key=options.api_key)
+            self.client = OpenAI(api_key=options.api_key, base_url=options.base_url)
         elif os.environ.get("OPENAI_API_KEY"):
-            self.client = OpenAI()
+            self.client = OpenAI(
+                api_key=os.environ.get("OPENAI_API_KEY"), base_url=options.base_url
+            )
         else:
             raise ValueError("OpenAI API key is required")
-
         self.inference_config = options.inference_config
 
     @staticmethod
