@@ -1,10 +1,16 @@
-# Rojak
+<p align="center">
+    <a href="https://github.com/StreetLamb/rojak/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/StreetLamb/rojak.svg?color=blue"></a>
+    <a href="https://github.com/StreetLamb/rojak/releases"><img alt="GitHub release" src="https://img.shields.io/github/release/StreetLamb/rojak.svg"></a>
+    <a href="https://github.com/StreetLamb/rojak/actions/workflows/test.yml"><img alt="Test" src="https://github.com/StreetLamb/rojak/actions/workflows/test.yml/badge.svg"></a>
+</p>
 
-Open-source framework for building highly durable and scalable multi-agent orchestrations.
+<h3 align="center">
+  <p> Rojak - A library for building highly durable and scalable multi-agent orchestrations.</p>
+</h3>
 
 See it in action:
 
-https://github.com/user-attachments/assets/74a2f0be-2021-40a6-a43b-db001fb95dbb
+https://github.com/user-attachments/assets/25e6aa4d-edd7-4948-bd85-c9c6dd158fa4
 
 ## Features
 - 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
