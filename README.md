@@ -21,6 +21,41 @@ https://github.com/user-attachments/assets/25e6aa4d-edd7-4948-bd85-c9c6dd158fa4
 - 👁️ **Visiblity** - Track your agents’ past and current actions in real time through a user-friendly browser-based UI.
 - 🌐 **Universal Deployment** - Deploy and run locally or on any cloud platform.
 
+# Table of Contents
+
+- [Table of Contents](#table-of-contents)
+  - [Install](#install)
+  - [Usage](#usage)
+- [Overview](#overview)
+- [Examples](#examples)
+- [Understanding Rojak’s Architecture](#understanding-rojaks-architecture)
+- [Running Rojak](#running-rojak)
+    - [Workers](#workers)
+    - [`rojak.run()`](#rojakrun)
+      - [Arguments](#arguments)
+      - [`OrchestratorResponse` Fields](#orchestratorresponse-fields)
+  - [Agents](#agents)
+    - [`Agent` Abstract Class Fields](#agent-abstract-class-fields)
+    - [Instructions](#instructions)
+    - [Functions](#functions)
+    - [Handoffs and Updating Context Variables](#handoffs-and-updating-context-variables)
+    - [Function Schemas](#function-schemas)
+    - [Retrievers](#retrievers)
+    - [Timeouts and Retries](#timeouts-and-retries)
+  - [Sessions](#sessions)
+    - [`rojak.create_session()`](#rojakcreate_session)
+      - [Arguments](#arguments-1)
+    - [`session.get_session()`](#sessionget_session)
+      - [Arguments](#arguments-2)
+    - [`session.send_messages()`](#sessionsend_messages)
+      - [Arguments](#arguments-3)
+    - [Other Session methods](#other-session-methods)
+  - [Schedules](#schedules)
+    - [`rojak.create_schedule()`](#rojakcreate_schedule)
+      - [Arguments](#arguments-4)
+    - [`rojak.list_scheduled_runs()`](#rojaklist_scheduled_runs)
+  - [Model Context Protocol (MCP) Servers](#model-context-protocol-mcp-servers)
+
 ## Install
 
 Install the core Rojak library:
@@ -48,6 +83,7 @@ pip install rojak[qdrant-client]
 
 ## Usage
 
+Start the Temporal development server.
 ```shell
 temporal server start-dev
 ```
@@ -111,42 +147,7 @@ Ready to chat and assist,
 What do you wish for?
 ```
 
-## Table of Contents
-
-- [Rojak](#rojak)
-  - [Features](#features)
-  - [Install](#install)
-  - [Usage](#usage)
-  - [Table of Contents](#table-of-contents)
-- [Overview](#overview)
-- [Examples](#examples)
-- [Understanding Rojak’s Architecture](#understanding-rojaks-architecture)
-- [Running Rojak](#running-rojak)
-    - [Workers](#workers)
-    - [`rojak.run()`](#rojakrun)
-      - [Arguments](#arguments)
-      - [`OrchestratorResponse` Fields](#orchestratorresponse-fields)
-  - [Agents](#agents)
-    - [`Agent` Abstract Class Fields](#agent-abstract-class-fields)
-    - [Instructions](#instructions)
-    - [Functions](#functions)
-    - [Handoffs and Updating Context Variables](#handoffs-and-updating-context-variables)
-    - [Function Schemas](#function-schemas)
-    - [Retrievers](#retrievers)
-    - [Timeouts and Retries](#timeouts-and-retries)
-  - [Sessions](#sessions)
-    - [`rojak.create_session()`](#rojakcreate_session)
-      - [Arguments](#arguments-1)
-    - [`session.get_session()`](#sessionget_session)
-      - [Arguments](#arguments-2)
-    - [`session.send_messages()`](#sessionsend_messages)
-      - [Arguments](#arguments-3)
-    - [Other Session methods](#other-session-methods)
-  - [Schedules](#schedules)
-    - [`rojak.create_schedule()`](#rojakcreate_schedule)
-      - [Arguments](#arguments-4)
-    - [`rojak.list_scheduled_runs()`](#rojaklist_scheduled_runs)
-  - [Model Context Protocol (MCP) Servers](#model-context-protocol-mcp-servers)
+View this completed workflow at `http://localhost:8233`.
 
 # Overview
 
@@ -162,7 +163,8 @@ Much like OpenAI’s Swarm, Rojak employs two key concepts:
 Basic examples can be found in the `/examples` directory:
 
 - [`weather`](examples/weather/): A straightforward example demonstrating tool calling and the use of `context_variables`.
-- [`mcp_weather`](examples/mcp_weather/) An example demostrating connecting to MCP servers and executing tools through them.
+- [`mcp_weather`](examples/mcp_weather/) An example demonstrating connecting to MCP servers and executing tools through them.
+- [`pizza`](examples/pizza/) A complete example demonstrating using multiple agents to assist users in ordering food.
 
 
 # Understanding Rojak’s Architecture
