@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 import json
-from typing import Union
+from typing import Literal, Union
 from temporalio import workflow
 from temporalio.exceptions import ActivityError
 from rojak.retrievers import Retriever
@@ -68,6 +68,26 @@ class AgentWorkflowResponse:
     """Indicate which agent the message originated from."""
 
 
+@dataclass
+class ResumeParams:
+    action: Literal["approve", "reject"]
+    """Action to take on the interrupt."""
+
+    tool_id: str
+    """Tool call id to resume."""
+
+    content: str | None = None
+    """Feedback to pass to Agent."""
+
+
+class ToolRejectedError(Exception):
+    """Error raised when a tool call is rejected."""
+
+    def __init__(self, message: str, cause: Exception = None):
+        super().__init__(message)
+        self.__cause__ = cause
+
+
 class AgentWorkflow:
     def __init__(self, params: AgentWorkflowRunParams):
         self.agent = params.agent
@@ -78,6 +98,15 @@ class AgentWorkflow:
         self.debug = params.debug
         self.messages = params.messages
         self.context_variables = params.context_variables
+
+        # Handle interrupts
+        self.interrupt_map = {
+            interrupt.tool_name: interrupt for interrupt in params.agent.interrupts
+        }
+        self.require_approval: set[str] = set()  # tool call ids for approval
+        self.resumed: dict[
+            str, ResumeParams
+        ] = {}  # tool call ids that resumed, pending actions
 
     async def run(self) -> tuple[AgentWorkflowResponse, list[ConversationMessage]]:
         # process instructions
@@ -206,6 +235,37 @@ class AgentWorkflow:
             )
             return ""
 
+    async def handle_interrupt(self, tool_call: AgentToolCall):
+        """
+        Handles interrupts at a specified point ("before" or "after").
+        """
+        if tool_call.function.name in self.interrupt_map:
+            self.require_approval.add(tool_call.id)
+
+            debug_print(
+                self.debug,
+                workflow.now(),
+                f"Interrupt: {self.interrupt_map[tool_call.function.name].question}",
+            )
+
+            await workflow.wait_condition(
+                lambda: tool_call.id not in self.require_approval
+            )
+
+            debug_print(
+                self.debug,
+                workflow.now(),
+                f"Interrupt: Resuming tool call '{tool_call.function.name}'",
+            )
+
+            resume_params = self.resumed[tool_call.id]
+
+            if resume_params.action == "reject":
+                raise ToolRejectedError("Tool rejected.") from ValueError(
+                    f"Rejected by user. Reason: '{resume_params.content}'"
+                )
+            del self.resumed[tool_call.id]
+
     async def handle_tool_call(
         self,
         tool_call: AgentToolCall,
@@ -218,6 +278,8 @@ class AgentWorkflow:
         name = tool_call.function.name
         args = json.loads(tool_call.function.arguments)
         try:
+            await self.handle_interrupt(tool_call)
+
             # Execute function in activity
             debug_print(
                 self.debug,
@@ -237,14 +299,14 @@ class AgentWorkflow:
                 output=result,
             )
             return AgentWorkflowResponse(output=tool_response, sender=self.agent.name)
-        except ActivityError as e:
+        except (ActivityError, ToolRejectedError) as e:
             # If error, let the model know by sending error message in tool response
             workflow.logger.error(
                 f"Failed to process tool call '{name}'. "
                 f"Error will be sent to agent to reassess. Error: {e}"
             )
             result = AgentExecuteFnResult(
-                output=str(e.cause), context_variables=context_variables
+                output=str(e.__cause__), context_variables=context_variables
             )
             tool_response = ToolResponse(tool_call_id=tool_call.id, output=result)
             return AgentWorkflowResponse(output=tool_response, sender=self.agent.name)

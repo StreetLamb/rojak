@@ -9,6 +9,7 @@ from rojak.types import (
     RetryOptions,
     MCPServerConfig,
     InitMcpResult,
+    Interrupt,
 )
 from temporalio.exceptions import ApplicationError
 
@@ -154,6 +155,9 @@ class Agent(ABC):
 
     parallel_tool_calls: bool = True
     """Whether model should perform multiple tool calls together."""
+
+    interrupts: list[Interrupt] = field(default_factory=list)
+    """List of interrupts for reviewing tool use."""
 
     retriever: Retriever | None = None
     """Specify which retriever to use."""

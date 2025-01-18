@@ -2,16 +2,14 @@ import copy
 from dataclasses import dataclass, field
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ChildWorkflowError
-from rojak.types import (
-    ConversationMessage,
-    ContextVariables,
-)
+from rojak.types import ConversationMessage, ContextVariables, Interrupt
 from collections import deque
 import asyncio
 from rojak.utils import debug_print
 from rojak.workflows.agent_workflow import (
     AgentWorkflow,
     AgentWorkflowRunParams,
+    ResumeParams,
     ToolResponse,
     AgentTypes,
 )
@@ -55,11 +53,14 @@ class OrchestratorResponse:
     messages: list[ConversationMessage]
     """The list of updated messages."""
 
-    agent: AgentTypes | None
-    """The last agent to be called."""
-
     context_variables: ContextVariables
     """The dictionary of the updated context variables."""
+
+    agent: AgentTypes | None = None
+    """The last agent to be called."""
+
+    interrupt: Interrupt | None = None
+    """The object surfaced to the client when the interupt is triggered."""
 
 
 @dataclass
@@ -115,6 +116,7 @@ class OrchestratorBaseWorkflow:
         self.agent = params.agent
         self.debug = params.debug
         self.context_variables = params.context_variables
+        self.current_agent_workflow: AgentWorkflow | None = None
 
     async def process(self, active_agent: Agent) -> Agent | None:
         params = AgentWorkflowRunParams(
@@ -124,6 +126,7 @@ class OrchestratorBaseWorkflow:
             debug=self.debug,
         )
         agent_workflow = AgentWorkflow(params)
+        self.current_agent_workflow = agent_workflow
         response, updated_messages = await agent_workflow.run()
 
         self.messages = updated_messages
@@ -152,6 +155,14 @@ class OrchestratorBaseWorkflow:
     @workflow.query
     def get_messages(self) -> list[ConversationMessage]:
         return self.messages
+
+    @workflow.signal
+    def resume(self, params: ResumeParams):
+        """Resume interrupt"""
+        if self.current_agent_workflow:
+            if params.tool_id in self.current_agent_workflow.require_approval:
+                self.current_agent_workflow.require_approval.remove(params.tool_id)
+                self.current_agent_workflow.resumed[params.tool_id] = params
 
 
 @workflow.defn

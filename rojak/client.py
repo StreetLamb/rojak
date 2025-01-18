@@ -25,6 +25,7 @@ with workflow.unsafe.imports_passed_through():
         ShortOrchestratorParams,
         ShortOrchestratorWorkflow,
     )
+    from rojak.workflows.agent_workflow import ResumeParams
 
 
 class Rojak:
@@ -220,6 +221,10 @@ class Rojak:
             id=id,
             task_queue=self.task_queue,
         )
+
+    async def resume(self, params: ResumeParams, id: str):
+        """Resume an interrupted workflow"""
+        await self.client.get_workflow_handle(id).signal("resume", params)
 
     async def get_run_result(self, id: str) -> OrchestratorResponse:
         """Get result from a completed orchestrator.
