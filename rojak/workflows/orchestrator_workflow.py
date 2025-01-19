@@ -35,6 +35,9 @@ class OrchestratorParams:
     history_size: int = field(default=10)
     """The maximum number of messages retained in the list before older messages are removed."""
 
+    messages: list[ConversationMessage] = field(default_factory=list)
+    """List of conversation messages to initialise workflow with."""
+
 
 @dataclass
 class OrchestratorResponse:
@@ -112,7 +115,7 @@ class OrchestratorWorkflow:
         self.task_id: str | None = None
         self.history_size = params.history_size
         self.type = params.type
-        self.messages: list[ConversationMessage] = []
+        self.messages: list[ConversationMessage] = params.messages
 
     @workflow.run
     async def run(self, params: OrchestratorParams) -> OrchestratorResponse:
@@ -174,6 +177,7 @@ class OrchestratorWorkflow:
                                     max_turns=self.max_turns,
                                     debug=self.debug,
                                     history_size=self.history_size,
+                                    messages=self.messages,
                                 )
                             ]
                         )
