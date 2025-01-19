@@ -1,21 +1,28 @@
 from unittest.mock import Mock
 import uuid
 import pytest
-from rojak import Rojak
 from temporalio.testing import WorkflowEnvironment
+
+from rojak import Rojak
 from rojak.agents import (
     OpenAIAgent,
     OpenAIAgentActivities,
     OpenAIAgentOptions,
     AgentExecuteFnResult,
     AgentInstructionOptions,
+    Interrupt,
+    ResumeRequest,
+    ResumeResponse,
 )
-from rojak.types.types import RetryOptions, RetryPolicy
-from rojak.workflows import OrchestratorResponse
+from rojak.client import RunResponse
+from rojak.types import (
+    RetryOptions,
+    RetryPolicy,
+)
+from rojak.workflows import OrchestratorResponse, TaskParams
 from tests.mock_client import MockOpenAIClient, create_mock_response
 
 DEFAULT_RESPONSE_CONTENT = "sample response content"
-
 DEFAULT_RESPONSE_CONTENT_2 = "sample response content 2"
 
 
@@ -37,19 +44,33 @@ async def test_run_with_messages(mock_openai_client: MockOpenAIClient):
             OpenAIAgentOptions(client=mock_openai_client)
         )
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
             agent = OpenAIAgent(name="assistant")
-            response: OrchestratorResponse = await rojak.run(
-                id=str(uuid.uuid4()),
+            task = TaskParams(
                 agent=agent,
                 messages=[{"role": "user", "content": "Hello how are you?"}],
             )
+
+            run_response: RunResponse = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="stateless",
+                task=task,
+            )
+
+            # The final result can be an OrchestratorResponse or ResumeRequest
+            assert isinstance(run_response.result, OrchestratorResponse)
+            response: OrchestratorResponse = run_response.result
             assert response.messages[-1].role == "assistant"
             assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
 
 @pytest.mark.asyncio
-async def test_get_run_result(mock_openai_client: MockOpenAIClient):
+async def test_get_result(mock_openai_client: MockOpenAIClient):
+    """
+    Demonstrates that we can re-run the same workflow with no new TaskParams
+    and still retrieve the last state (OrchestratorResponse).
+    """
     task_queue_name = str(uuid.uuid4())
     async with await WorkflowEnvironment.start_time_skipping() as env:
         rojak = Rojak(client=env.client, task_queue=task_queue_name)
@@ -57,18 +78,29 @@ async def test_get_run_result(mock_openai_client: MockOpenAIClient):
             OpenAIAgentOptions(client=mock_openai_client)
         )
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
             agent = OpenAIAgent(name="assistant")
-            id = str(uuid.uuid4())
-            await rojak.run(
-                id=id,
+            workflow_id = str(uuid.uuid4())
+
+            # First run with an initial task
+            task = TaskParams(
                 agent=agent,
                 messages=[{"role": "user", "content": "Hello how are you?"}],
             )
+            run_response: RunResponse = await rojak.run(
+                id=workflow_id,
+                type="stateless",
+                task=task,
+            )
 
-            response = await rojak.get_run_result(id)
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+            response = await rojak.get_result(
+                id=run_response.id, task_id=run_response.task_id
+            )
+
+            assert isinstance(response, OrchestratorResponse)
+            first_response: OrchestratorResponse = response
+            assert first_response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -78,7 +110,7 @@ async def test_callable_instructions(mock_openai_client: MockOpenAIClient):
     instruct_fn_mock = Mock()
 
     def instruct_fn(context_variables):
-        res = f"My name is {context_variables.get("name")}"
+        res = f"My name is {context_variables.get('name')}"
         instruct_fn_mock(context_variables)
         instruct_fn_mock.return_value = res
         return res
@@ -89,6 +121,7 @@ async def test_callable_instructions(mock_openai_client: MockOpenAIClient):
             OpenAIAgentOptions(client=mock_openai_client, all_functions=[instruct_fn])
         )
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
             agent = OpenAIAgent(
                 name="assistant",
@@ -97,13 +130,18 @@ async def test_callable_instructions(mock_openai_client: MockOpenAIClient):
                 ),
             )
             context_variables = {"name": "John"}
-            await rojak.run(
-                id=str(uuid.uuid4()),
+            task = TaskParams(
                 agent=agent,
                 messages=[{"role": "user", "content": "Hello how are you?"}],
+            )
+            run_response: RunResponse = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="stateless",
+                task=task,
                 context_variables=context_variables,
             )
 
+            assert isinstance(run_response.result, OrchestratorResponse)
             instruct_fn_mock.assert_called_once_with(context_variables)
             assert instruct_fn_mock.return_value == (
                 f"My name is {context_variables.get('name')}"
@@ -137,7 +175,7 @@ async def test_failed_tool_call(mock_openai_client: MockOpenAIClient):
         }
     ]
 
-    # set mock to return a response that triggers function call
+    # set mock to return a response that triggers function calls
     mock_openai_client.set_sequential_responses(
         [
             create_mock_response(
@@ -167,19 +205,28 @@ async def test_failed_tool_call(mock_openai_client: MockOpenAIClient):
         )
         rojak = Rojak(client=env.client, task_queue=task_queue_name)
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
-            context_variables = {"seen": ["test"]}
-            response = await rojak.run(
+            context_vars = {"seen": ["test"]}
+            task = TaskParams(agent=agent, messages=messages)
+            run_response: RunResponse = await rojak.run(
                 id=str(uuid.uuid4()),
-                agent=agent,
-                messages=messages,
-                context_variables=context_variables,
+                type="stateless",
+                task=task,
+                context_variables=context_vars,
             )
+
+            assert isinstance(run_response.result, OrchestratorResponse)
+            orchestrator_resp: OrchestratorResponse = run_response.result
+
             get_weather_mock.assert_called()
             get_air_quality_mock.assert_called_once()
-            assert response.context_variables["seen"] == ["test", "get_air_quality"]
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+            assert orchestrator_resp.context_variables["seen"] == [
+                "test",
+                "get_air_quality",
+            ]
+            assert orchestrator_resp.messages[-1].role == "assistant"
+            assert orchestrator_resp.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
 
 @pytest.mark.asyncio
@@ -188,22 +235,19 @@ async def test_multiple_tool_calls(mock_openai_client: MockOpenAIClient):
 
     expected_location = "San Francisco"
 
-    # set up mock to record function calls
     get_weather_mock = Mock()
     get_air_quality_mock = Mock()
 
     def get_weather(location: str, context_variables: dict):
-        res = f"It's sunny today in {context_variables.get("location")}"
         get_weather_mock(location=location)
-        get_weather_mock.return_value = res
         context_variables["seen"].append("get_weather")
+        res = f"It's sunny today in {location}"
         return AgentExecuteFnResult(output=res, context_variables=context_variables)
 
     def get_air_quality(location: str, context_variables: dict):
-        res = f"Air quality in {context_variables.get("location")} is good!"
         get_air_quality_mock(location=location)
-        get_air_quality_mock.return_value = res
         context_variables["seen"].append("get_air_quality")
+        res = f"Air quality in {location} is good!"
         return AgentExecuteFnResult(output=res, context_variables=context_variables)
 
     messages = [
@@ -213,7 +257,6 @@ async def test_multiple_tool_calls(mock_openai_client: MockOpenAIClient):
         }
     ]
 
-    # set mock to return a response that triggers function call
     mock_openai_client.set_sequential_responses(
         [
             create_mock_response(
@@ -234,7 +277,8 @@ async def test_multiple_tool_calls(mock_openai_client: MockOpenAIClient):
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         agent = OpenAIAgent(
-            name="Test Agent", functions=["get_weather", "get_air_quality"]
+            name="Test Agent",
+            functions=["get_weather", "get_air_quality"],
         )
         openai_activities = OpenAIAgentActivities(
             OpenAIAgentOptions(
@@ -243,36 +287,44 @@ async def test_multiple_tool_calls(mock_openai_client: MockOpenAIClient):
         )
         rojak = Rojak(client=env.client, task_queue=task_queue_name)
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
-            context_variables = {"location": expected_location, "seen": []}
-            response = await rojak.run(
+            context_vars = {"location": expected_location, "seen": []}
+            task = TaskParams(agent=agent, messages=messages)
+            run_response: RunResponse = await rojak.run(
                 id=str(uuid.uuid4()),
-                agent=agent,
-                messages=messages,
-                context_variables=context_variables,
+                type="stateless",
+                task=task,
+                context_variables=context_vars,
             )
+
+            assert isinstance(run_response.result, OrchestratorResponse)
+            orchestrator_resp: OrchestratorResponse = run_response.result
+
             get_weather_mock.assert_called_once_with(location=expected_location)
             get_air_quality_mock.assert_called_once_with(location=expected_location)
-            assert get_weather_mock.return_value == (
-                f"It's sunny today in {context_variables.get("location")}"
-            )
-            assert "get_weather" in response.context_variables.get("seen")
-            assert "get_air_quality" in response.context_variables.get("seen")
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+            assert "get_weather" in orchestrator_resp.context_variables["seen"]
+            assert "get_air_quality" in orchestrator_resp.context_variables["seen"]
+            assert orchestrator_resp.messages[-1].role == "assistant"
+            assert orchestrator_resp.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
 
 @pytest.mark.asyncio
 async def test_handoff(mock_openai_client: MockOpenAIClient):
     task_queue_name = str(uuid.uuid4())
 
-    def transfer_to_agent2():
-        return agent2
+    def transfer_to_agent2(context_variables: dict):
+        # Transfer to another agent
+        return AgentExecuteFnResult(
+            output="Handoff to agent2",
+            context_variables=context_variables,
+            agent=agent2,
+        )
 
     agent1 = OpenAIAgent(name="Test Agent 1", functions=["transfer_to_agent2"])
     agent2 = OpenAIAgent(name="Test Agent 2")
 
-    # set mock to return a response that triggers the handoff
+    # mock that triggers the handoff
     mock_openai_client.set_sequential_responses(
         [
             create_mock_response(
@@ -293,79 +345,39 @@ async def test_handoff(mock_openai_client: MockOpenAIClient):
         )
         rojak = Rojak(client=env.client, task_queue=task_queue_name)
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
-            response = await rojak.run(
-                id=str(uuid.uuid4()),
+            task = TaskParams(
                 agent=agent1,
                 messages=[{"role": "user", "content": "I want to talk to agent 2"}],
             )
-            print(response.agent)
-            print(agent2)
-            assert response.agent == agent2
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
-
-
-@pytest.mark.asyncio
-async def test_create_session():
-    task_queue_name = str(uuid.uuid4())
-
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        rojak = Rojak(client=env.client, task_queue=task_queue_name)
-        openai_activities = OpenAIAgentActivities(
-            OpenAIAgentOptions(client=mock_openai_client)
-        )
-        worker = await rojak.create_worker([openai_activities])
-        session_id = str(uuid.uuid4())
-        async with worker:
-            agent = OpenAIAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=session_id,
-                agent=agent,
+            run_response: RunResponse = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="stateless",
+                task=task,
             )
-            assert session.workflow_handle.id == session_id
-
-
-@pytest.mark.asyncio
-async def test_create_duplicate_session():
-    task_queue_name = str(uuid.uuid4())
-
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        rojak = Rojak(client=env.client, task_queue=task_queue_name)
-        openai_activities = OpenAIAgentActivities(
-            OpenAIAgentOptions(client=mock_openai_client)
-        )
-        worker = await rojak.create_worker([openai_activities])
-        session_id = str(uuid.uuid4())
-        async with worker:
-            agent = OpenAIAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=session_id,
-                agent=agent,
-            )
-
-            session2 = await rojak.create_session(
-                session_id=session_id,
-                agent=agent,
-            )
-
-            run_id_1 = (await session.workflow_handle.describe()).run_id
-            run_id_2 = (await session2.workflow_handle.describe()).run_id
-
-            assert run_id_1 == run_id_2
+            assert isinstance(run_response.result, OrchestratorResponse)
+            orchestrator_resp: OrchestratorResponse = run_response.result
+            assert orchestrator_resp.agent == agent2
+            assert orchestrator_resp.messages[-1].role == "assistant"
+            assert orchestrator_resp.messages[-1].content == DEFAULT_RESPONSE_CONTENT
 
 
 @pytest.mark.asyncio
 async def test_send_multiple_messages(mock_openai_client: MockOpenAIClient):
+    """
+    Demonstrates sending multiple user messages in separate calls to the same workflow.
+    """
     task_queue_name = str(uuid.uuid4())
 
+    # We want two different assistant replies in sequence
     mock_openai_client.set_sequential_responses(
         [
             create_mock_response(
                 message={"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT},
             ),
             create_mock_response(
-                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2}
+                message={"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2},
             ),
         ]
     )
@@ -376,32 +388,44 @@ async def test_send_multiple_messages(mock_openai_client: MockOpenAIClient):
             OpenAIAgentOptions(client=mock_openai_client)
         )
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
             agent = OpenAIAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
-            )
+            workflow_id = str(uuid.uuid4())
 
-            response: OrchestratorResponse = await session.send_messages(
+            # First user message
+            task_1 = TaskParams(
                 agent=agent,
                 messages=[{"role": "user", "content": "Hello how are you?"}],
             )
-            assert response.agent == agent
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
-
-            response2: OrchestratorResponse = await session.send_messages(
-                agent=agent,
-                messages=[{"role": "user", "content": "Hello how are you?"}],
+            run_response_1: RunResponse = await rojak.run(
+                id=workflow_id,
+                type="persistent",
+                task=task_1,
             )
-            assert response2.agent == agent
-            assert response2.messages[-1].role == "assistant"
-            assert response2.messages[-1].content == DEFAULT_RESPONSE_CONTENT_2
+            assert isinstance(run_response_1.result, OrchestratorResponse)
+            response_1: OrchestratorResponse = run_response_1.result
+            assert response_1.messages[-1].role == "assistant"
+            assert response_1.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+
+            # Second user message (same workflow_id)
+            task_2 = TaskParams(
+                agent=agent,
+                messages=[{"role": "user", "content": "What's new today?"}],
+            )
+            run_response_2: RunResponse = await rojak.run(
+                id=workflow_id,
+                type="persistent",
+                task=task_2,
+            )
+            assert isinstance(run_response_2.result, OrchestratorResponse)
+            response_2: OrchestratorResponse = run_response_2.result
+            assert response_2.messages[-1].role == "assistant"
+            assert response_2.messages[-1].content == DEFAULT_RESPONSE_CONTENT_2
 
 
 @pytest.mark.asyncio
-async def test_session_result(mock_openai_client: MockOpenAIClient):
+async def test_result(mock_openai_client: MockOpenAIClient):
     task_queue_name = str(uuid.uuid4())
 
     def transfer_agent_b(context_variables: dict):
@@ -412,27 +436,22 @@ async def test_session_result(mock_openai_client: MockOpenAIClient):
             agent=agent_b,
         )
 
-    # set mock to return a response that triggers function call
     mock_openai_client.set_sequential_responses(
         [
             create_mock_response(
                 message={"role": "assistant", "content": ""},
-                function_calls=[
-                    {
-                        "name": "transfer_agent_b",
-                        "args": {},
-                    },
-                ],
+                function_calls=[{"name": "transfer_agent_b", "args": {}}],
             ),
             create_mock_response(
-                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT}
+                message={"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2},
             ),
         ]
     )
 
+    agent_a = OpenAIAgent(name="Agent A", functions=["transfer_agent_b"])
+    agent_b = OpenAIAgent(name="Agent B")
+
     async with await WorkflowEnvironment.start_time_skipping() as env:
-        agent_a = OpenAIAgent(name="Agent A", functions=["transfer_agent_b"])
-        agent_b = OpenAIAgent(name="Agent B")
         openai_activities = OpenAIAgentActivities(
             OpenAIAgentOptions(
                 client=mock_openai_client, all_functions=[transfer_agent_b]
@@ -440,13 +459,172 @@ async def test_session_result(mock_openai_client: MockOpenAIClient):
         )
         rojak = Rojak(client=env.client, task_queue=task_queue_name)
         worker = await rojak.create_worker([openai_activities])
+
         async with worker:
-            session_id = str(uuid.uuid4())
-            session = await rojak.create_session(session_id, agent_a, {"seen": False})
-            response = await session.send_messages(
-                [{"role": "user", "content": "I want to talk to agent B"}],
-                agent_a,
+            context_vars = {"seen": False}
+            task = TaskParams(
+                agent=agent_a,
+                messages=[{"role": "user", "content": "I want to talk to agent B"}],
             )
-            assert response.context_variables["seen"] is True
-            assert response.messages[-1].role == "assistant"
-            assert response.messages[-1].content == DEFAULT_RESPONSE_CONTENT
+            run_response: RunResponse = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="persistent",
+                task=task,
+                context_variables=context_vars,
+            )
+
+            assert isinstance(run_response.result, OrchestratorResponse)
+            orchestrator_resp: OrchestratorResponse = run_response.result
+            assert orchestrator_resp.context_variables["seen"] is True
+            assert orchestrator_resp.agent == agent_b
+            assert orchestrator_resp.messages[-1].role == "assistant"
+            assert orchestrator_resp.messages[-1].content == DEFAULT_RESPONSE_CONTENT_2
+
+
+@pytest.mark.asyncio
+async def test_interrupt_and_approve(mock_openai_client: MockOpenAIClient):
+    """
+    Demonstrates how the orchestrator interrupts a function call,
+    returns a ResumeRequest, and how we "approve" the call
+    by calling rojak.run(..., resume=ResumeResponse(...)).
+    """
+    task_queue_name = str(uuid.uuid4())
+
+    def say_hello():
+        say_hello_mock()
+        return "Hello!"
+
+    mock_openai_client.set_sequential_responses(
+        [
+            create_mock_response(
+                message={"role": "assistant", "content": ""},
+                function_calls=[{"name": "say_hello", "args": {}}],
+            ),
+            create_mock_response(
+                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2}
+            ),
+        ]
+    )
+
+    agent = OpenAIAgent(
+        functions=["say_hello"],
+        interrupts=[Interrupt("say_hello")],
+    )
+
+    say_hello_mock = Mock()
+
+    openai_activities = OpenAIAgentActivities(
+        OpenAIAgentOptions(
+            client=mock_openai_client,
+            all_functions=[say_hello],
+        )
+    )
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        rojak = Rojak(client=env.client, task_queue=task_queue_name)
+        worker = await rojak.create_worker([openai_activities])
+
+        async with worker:
+            workflow_id = str(uuid.uuid4())
+            first_task = TaskParams(
+                agent=agent,
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+            run_resp_1 = await rojak.run(
+                id=workflow_id, type="persistent", task=first_task
+            )
+
+            # We expect a ResumeRequest because we have an interrupt
+            assert isinstance(run_resp_1.result, ResumeRequest)
+            resume_req = run_resp_1.result
+            assert resume_req.tool_name == "say_hello"
+            tool_id = resume_req.tool_id  # We'll need this to resume
+
+            approve_resume = ResumeResponse(action="approve", tool_id=tool_id)
+            run_resp_2 = await rojak.run(
+                id=workflow_id,
+                resume=approve_resume,
+            )
+
+            # This time, we should get an OrchestratorResponse
+            assert isinstance(run_resp_2.result, OrchestratorResponse)
+            orch_resp = run_resp_2.result
+
+            say_hello_mock.assert_called_once()
+            assert orch_resp.messages[-1].content == DEFAULT_RESPONSE_CONTENT_2
+
+
+@pytest.mark.asyncio
+async def test_interrupt_and_reject(mock_openai_client: MockOpenAIClient):
+    """
+    Demonstrates how we 'reject' an interrupted function call.
+    The orchestrator will skip calling the function and continue.
+    """
+    task_queue_name = str(uuid.uuid4())
+
+    def say_hello():
+        say_hello_mock()
+        return "Hello!"
+
+    mock_openai_client.set_sequential_responses(
+        [
+            create_mock_response(
+                message={"role": "assistant", "content": ""},
+                function_calls=[{"name": "say_hello", "args": {}}],
+            ),
+            create_mock_response(
+                {"role": "assistant", "content": DEFAULT_RESPONSE_CONTENT_2}
+            ),
+        ]
+    )
+
+    agent = OpenAIAgent(
+        functions=["say_hello"],
+        interrupts=[Interrupt("say_hello")],
+    )
+
+    say_hello_mock = Mock()
+
+    openai_activities = OpenAIAgentActivities(
+        OpenAIAgentOptions(
+            client=mock_openai_client,
+            all_functions=[say_hello],
+        )
+    )
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        rojak = Rojak(client=env.client, task_queue=task_queue_name)
+        worker = await rojak.create_worker([openai_activities])
+
+        async with worker:
+            workflow_id = str(uuid.uuid4())
+            first_task = TaskParams(
+                agent=agent,
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+            run_resp_1 = await rojak.run(
+                id=workflow_id, type="persistent", task=first_task
+            )
+
+            # We expect a ResumeRequest because we have an interrupt
+            assert isinstance(run_resp_1.result, ResumeRequest)
+            resume_req = run_resp_1.result
+            assert resume_req.tool_name == "say_hello"
+            tool_id = resume_req.tool_id  # We'll need this to resume
+
+            # Reject the function call
+            reject_reason = "User does not want this."
+            reject_resume = ResumeResponse(
+                action="reject", tool_id=tool_id, content=reject_reason
+            )
+            run_resp_2 = await rojak.run(
+                id=workflow_id,
+                resume=reject_resume,
+            )
+
+            # This time, we should get an OrchestratorResponse
+            assert isinstance(run_resp_2.result, OrchestratorResponse)
+            orch_resp = run_resp_2.result
+
+            # The function should not have been called
+            say_hello_mock.assert_not_called()
+            assert reject_reason in orch_resp.messages[-2].content
+            assert orch_resp.messages[-1].content == DEFAULT_RESPONSE_CONTENT_2
