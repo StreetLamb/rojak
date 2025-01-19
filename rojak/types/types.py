@@ -116,15 +116,3 @@ class InitMcpResult:
 
     tool_client_mapping: dict[str, str]
     """A dictionary mapping tool names to the corresponding MCP server names."""
-
-
-@dataclass
-class Interrupt:
-    tool_name: str
-    """The name of the tool to interrupt."""
-
-    question: str
-    """The question to ask the user."""
-
-    when: Literal["before"]
-    """When the interrupt should be triggered."""

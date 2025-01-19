@@ -5,7 +5,6 @@ from .types import (
     RetryOptions,
     MCPServerConfig,
     InitMcpResult,
-    Interrupt,
 )
 
 __all__ = [
@@ -15,5 +14,4 @@ __all__ = [
     "RetryOptions",
     "MCPServerConfig",
     "InitMcpResult",
-    "Interrupt",
 ]

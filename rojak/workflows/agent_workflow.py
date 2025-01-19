@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 import json
-from typing import Literal, Union
+from typing import TYPE_CHECKING, Union
 from temporalio import workflow
 from temporalio.exceptions import ActivityError
 from rojak.retrievers import Retriever
@@ -16,8 +16,12 @@ from rojak.agents import (
     AgentResponse,
     AgentExecuteFnResult,
     Agent,
+    ResumeResponse,
+    ResumeRequest,
 )
 
+if TYPE_CHECKING:
+    from rojak.workflows.orchestrator_workflow import OrchestratorBaseWorkflow
 
 try:
     from rojak.agents import OpenAIAgent
@@ -46,8 +50,14 @@ class AgentWorkflowRunParams:
     context_variables: ContextVariables
     """A dictionary of additional context variables, available to functions and Agent instructions."""
 
+    orchestrator: "OrchestratorBaseWorkflow"
+    """The parent orchestrator that called this workflow."""
+
+    task_id: str
+    """Unique identifier for this request."""
+
     debug: bool = False
-    """If True, enables debug logging"""
+    """If True, enables debug logging."""
 
 
 @dataclass
@@ -68,18 +78,6 @@ class AgentWorkflowResponse:
     """Indicate which agent the message originated from."""
 
 
-@dataclass
-class ResumeParams:
-    action: Literal["approve", "reject"]
-    """Action to take on the interrupt."""
-
-    tool_id: str
-    """Tool call id to resume."""
-
-    content: str | None = None
-    """Feedback to pass to Agent."""
-
-
 class ToolRejectedError(Exception):
     """Error raised when a tool call is rejected."""
 
@@ -90,6 +88,8 @@ class ToolRejectedError(Exception):
 
 class AgentWorkflow:
     def __init__(self, params: AgentWorkflowRunParams):
+        self.orchestrator = params.orchestrator
+        self.task_id = params.task_id
         self.agent = params.agent
         self.retry_policy = create_retry_policy(self.agent.retry_options.retry_policy)
         self.start_to_close_timeout = timedelta(
@@ -103,9 +103,9 @@ class AgentWorkflow:
         self.interrupt_map = {
             interrupt.tool_name: interrupt for interrupt in params.agent.interrupts
         }
-        self.require_approval: set[str] = set()  # tool call ids for approval
+        self.interrupted: set[str] = set()  # tool call ids for approval
         self.resumed: dict[
-            str, ResumeParams
+            str, ResumeResponse
         ] = {}  # tool call ids that resumed, pending actions
 
     async def run(self) -> tuple[AgentWorkflowResponse, list[ConversationMessage]]:
@@ -240,17 +240,23 @@ class AgentWorkflow:
         Handles interrupts at a specified point ("before" or "after").
         """
         if tool_call.function.name in self.interrupt_map:
-            self.require_approval.add(tool_call.id)
-
+            self.interrupted.add(tool_call.id)
+            interrupt = self.interrupt_map[tool_call.function.name]
             debug_print(
                 self.debug,
                 workflow.now(),
-                f"Interrupt: {self.interrupt_map[tool_call.function.name].question}",
+                f"Interrupt: {interrupt.question}",
+            )
+            self.orchestrator.responses[self.task_id] = ResumeRequest(
+                tool_id=tool_call.id,
+                tool_name=tool_call.function.name,
+                question=interrupt.question,
+                when=interrupt.when,
+                tool_arguments=tool_call.function.arguments,
+                task_id=self.task_id,
             )
 
-            await workflow.wait_condition(
-                lambda: tool_call.id not in self.require_approval
-            )
+            await workflow.wait_condition(lambda: tool_call.id in self.resumed)
 
             debug_print(
                 self.debug,

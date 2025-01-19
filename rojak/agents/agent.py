@@ -9,7 +9,6 @@ from rojak.types import (
     RetryOptions,
     MCPServerConfig,
     InitMcpResult,
-    Interrupt,
 )
 from temporalio.exceptions import ApplicationError
 
@@ -131,6 +130,46 @@ class AgentInstructionOptions:
 
     name: str
     """The name of the function."""
+
+
+@dataclass
+class Interrupt:
+    tool_name: str
+    """The name of the tool to interrupt."""
+
+    question: str
+    """The question to ask the user."""
+
+    when: Literal["before"]
+    """When the interrupt should be triggered."""
+
+
+@dataclass
+class ResumeRequest(Interrupt):
+    """Request to resume the interrupted agent."""
+
+    tool_id: str
+    """The ID of the tool that is interrupted."""
+
+    tool_arguments: str
+    """Arguments that will be passed to the tool that was interrupted."""
+
+    task_id: str
+    """Unique identifier of the request that triggered the interrupt."""
+
+
+@dataclass
+class ResumeResponse:
+    """Response to resume the interrupted agent."""
+
+    action: Literal["approve", "reject"]
+    """Action to take on the interrupt."""
+
+    tool_id: str
+    """Tool call id to resume."""
+
+    content: str | None = None
+    """Feedback to pass to Agent. Only for 'rejected' action."""
 
 
 @dataclass

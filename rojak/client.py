@@ -1,17 +1,17 @@
-from typing import AsyncIterator, Literal
-import warnings
+from typing import AsyncIterator, Literal, overload
 from temporalio.client import (
     Client,
     Schedule,
     ScheduleActionStartWorkflow,
     ScheduleSpec,
     ScheduleHandle,
+    WorkflowUpdateFailedError,
+    WithStartWorkflowOperation,
+    WorkflowHandle,
 )
-from temporalio import workflow
+from temporalio import workflow, common
 from temporalio.worker import Worker
-from temporalio.exceptions import WorkflowAlreadyStartedError
 from rojak.types import ConversationMessage, MCPServerConfig, InitMcpResult
-from rojak.session import Session
 
 with workflow.unsafe.imports_passed_through():
     from mcp import Tool
@@ -19,13 +19,13 @@ with workflow.unsafe.imports_passed_through():
     from rojak.agents import Agent, AgentActivities
     from rojak.mcp.mcp_client import MCPClient
     from rojak.workflows import (
-        OrchestratorWorkflow,
-        OrchestratorParams,
         OrchestratorResponse,
         ShortOrchestratorParams,
         ShortOrchestratorWorkflow,
     )
-    from rojak.workflows.agent_workflow import ResumeParams
+    from rojak.workflows.agent_workflow import ResumeRequest, ResumeResponse
+    from rojak.workflows.orchestrator_workflow import TaskParams
+    from uuid import uuid4
 
 
 class Rojak:
@@ -97,7 +97,7 @@ class Rojak:
         worker: Worker = Worker(
             self.client,
             task_queue=self.task_queue,
-            workflows=[OrchestratorWorkflow, ShortOrchestratorWorkflow],
+            workflows=[ShortOrchestratorWorkflow],
             activities=activities,
         )
 
@@ -188,43 +188,92 @@ class Rojak:
             ),
         )
 
+    @overload
     async def run(
         self,
         id: str,
-        agent: Agent,
-        messages: list[ConversationMessage],
+        task: TaskParams,
         context_variables: dict = {},
         max_turns: int = float("inf"),
         debug: bool = False,
-    ) -> OrchestratorResponse:
-        """Initialise an orchestrator with the provided inputs and wait for completion.
+    ) -> tuple[OrchestratorResponse | ResumeRequest | None, WorkflowHandle]: ...
+
+    @overload
+    async def run(
+        self, id: str, resume: ResumeResponse
+    ) -> tuple[OrchestratorResponse | ResumeRequest | None, WorkflowHandle]: ...
+
+    async def run(
+        self,
+        id: str,
+        task: TaskParams | None = None,
+        resume: ResumeResponse | None = None,
+        context_variables: dict = {},
+        max_turns: int = float("inf"),
+        debug: bool = False,
+    ) -> tuple[OrchestratorResponse | ResumeRequest | None, WorkflowHandle]:
+        """
+        Initialize and execute an orchestrator with the provided inputs, handling tasks, resuming workflows,
+        and waiting for completion.
 
         Requires a running worker.
 
         Args:
             id (str): Unique identifier of the orchestrator.
-            agent (Agent): The initial agent to be called.
-            messages (list[ConversationMessage]): A list of message objects.
-            context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
-            max_turns (int, optional): The maximum number of conversational turns allowed. Defaults to float("inf").
-            debug (bool, optional): If True, enables debug logging. Defaults to False.
+            task (TaskParams | None, optional): A task to be executed in the orchestrator. Defaults to None.
+            resume (ResumeResponse | None, optional): A resume object for continuing a paused workflow. Defaults to None.
+            context_variables (dict, optional): A dictionary of additional context variables available to functions
+                and agent instructions. Defaults to an empty dictionary.
+            max_turns (int, optional): The maximum number of conversational turns allowed. Defaults to infinity.
+            debug (bool, optional): If True, enables debug logging for the orchestrator. Defaults to False.
 
         Returns:
-            OrchestratorResponse: A response object containing updated messages, context_variables and agent.
-        """
-        data = ShortOrchestratorParams(
-            agent, context_variables, max_turns, messages, debug
-        )
-        return await self.client.execute_workflow(
-            ShortOrchestratorWorkflow.run,
-            data,
-            id=id,
-            task_queue=self.task_queue,
-        )
+            tuple[OrchestratorResponse | ResumeRequest | None, WorkflowHandle]:
+                - OrchestratorResponse: A response object containing updated messages, context variables, and agent
+                  information, if the workflow completes successfully.
+                - ResumeRequest: A request to resume the workflow if the current state requires further inputs or actions.
+                - None: Indicates that the operation failed.
+                - WorkflowHandle: A handle to the orchestrator workflow, allowing further interactions and updates.
 
-    async def resume(self, params: ResumeParams, id: str):
-        """Resume an interrupted workflow"""
-        await self.client.get_workflow_handle(id).signal("resume", params)
+        Notes:
+            - If a `task` is provided, the method starts a new orchestrator workflow.
+            - If a `resume` is provided, the method resumes the specified workflow.
+            - A new workflow is initialized with `context_variables`, `max_turns`, and `debug` settings.
+        """
+        start_op = None
+        task_id = str(uuid4())
+        try:
+            if task:
+                start_op = WithStartWorkflowOperation(
+                    ShortOrchestratorWorkflow.run,
+                    ShortOrchestratorParams(context_variables, max_turns, debug),
+                    id=id,
+                    id_conflict_policy=common.WorkflowIDConflictPolicy.USE_EXISTING,
+                    task_queue=self.task_queue,
+                )
+                result = await self.client.execute_update_with_start_workflow(
+                    ShortOrchestratorWorkflow.add_task,
+                    (task_id, task),
+                    start_workflow_operation=start_op,
+                    result_type=OrchestratorResponse | ResumeRequest,
+                )
+                workflow_handle = await start_op.workflow_handle()
+            else:
+                workflow_handle = self.client.get_workflow_handle_for(
+                    workflow=ShortOrchestratorWorkflow, workflow_id=id
+                )
+
+                result: (
+                    OrchestratorResponse | ResumeRequest
+                ) = await workflow_handle.execute_update(
+                    ShortOrchestratorWorkflow.add_task,
+                    (task_id, resume),
+                    result_type=OrchestratorResponse | ResumeRequest,
+                )
+        except WorkflowUpdateFailedError:
+            result = None
+
+        return result, workflow_handle
 
     async def get_run_result(self, id: str) -> OrchestratorResponse:
         """Get result from a completed orchestrator.
@@ -244,71 +293,71 @@ class Rojak:
         )
         return await workflow_handle.result()
 
-    async def get_session(self, session_id: str) -> Session:
-        """Retrieve the session with the given ID.
+    # async def get_session(self, session_id: str) -> Session:
+    #     """Retrieve the session with the given ID.
 
-        Args:
-            session_id (str): The unique identifier for the session.
+    #     Args:
+    #         session_id (str): The unique identifier for the session.
 
-        Raises:
-            ValueError: If no session with the specified ID exists.
+    #     Raises:
+    #         ValueError: If no session with the specified ID exists.
 
-        Returns:
-            Session: The Session object associated with the given ID.
-        """
-        try:
-            workflow_handle = self.client.get_workflow_handle(session_id)
-            description = await workflow_handle.describe()
-            if description.raw_info.type.name == "OrchestratorWorkflow":
-                return Session(workflow_handle)
-            else:
-                raise
-        except Exception:
-            raise ValueError(
-                f"Session with ID {session_id} does not exist. Please create a session first."
-            )
+    #     Returns:
+    #         Session: The Session object associated with the given ID.
+    #     """
+    #     try:
+    #         workflow_handle = self.client.get_workflow_handle(session_id)
+    #         description = await workflow_handle.describe()
+    #         if description.raw_info.type.name == "OrchestratorWorkflow":
+    #             return Session(workflow_handle)
+    #         else:
+    #             raise
+    #     except Exception:
+    #         raise ValueError(
+    #             f"Session with ID {session_id} does not exist. Please create a session first."
+    #         )
 
-    async def create_session(
-        self,
-        session_id: str,
-        agent: Agent,
-        context_variables: dict = {},
-        max_turns: int = float("inf"),
-        history_size: int = 10,
-        debug: bool = False,
-    ) -> Session:
-        """Create a session if not yet started. The session will maintain conversation history and configurations.
+    # async def create_session(
+    #     self,
+    #     session_id: str,
+    #     agent: Agent,
+    #     context_variables: dict = {},
+    #     max_turns: int = float("inf"),
+    #     history_size: int = 10,
+    #     debug: bool = False,
+    # ) -> Session:
+    #     """Create a session if not yet started. The session will maintain conversation history and configurations.
 
-        Args:
-            session_id (str): Unique identifier of the session.
-            agent (Agent): The initial agent to be called.
-            context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
-            max_turns (int, optional): The maximum number of conversational turns allowed. Defaults to float("inf").
-            history_size (int, optional): The maximum number of messages retained in the list before older messages are removed. When this limit is exceeded, the messages are summarized, and the summary becomes the first message in a new list. Defaults to 10.
-            debug (bool, optional): If True, enables debug logging. Defaults to False.
+    #     Args:
+    #         session_id (str): Unique identifier of the session.
+    #         agent (Agent): The initial agent to be called.
+    #         context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
+    #         max_turns (int, optional): The maximum number of conversational turns allowed. Defaults to float("inf").
+    #         history_size (int, optional): The maximum number of messages retained in the list before older messages are removed. When this limit is exceeded, the messages are summarized, and the summary becomes the first message in a new list. Defaults to 10.
+    #         debug (bool, optional): If True, enables debug logging. Defaults to False.
 
-        Returns:
-            Session: The Session object created.
-        """
-        data = OrchestratorParams(
-            agent=agent,
-            context_variables=context_variables,
-            max_turns=max_turns,
-            history_size=history_size,
-            debug=debug,
-        )
-        try:
-            workflow_handle = await self.client.start_workflow(
-                OrchestratorWorkflow.run,
-                data,
-                id=session_id,
-                task_queue=self.task_queue,
-            )
-            return Session(workflow_handle)
-        except WorkflowAlreadyStartedError:
-            warnings.warn(
-                "A session with this ID is already running. Returning the existing session.",
-                UserWarning,
-            )
-            workflow_handle = self.client.get_workflow_handle(session_id)
-            return Session(workflow_handle)
+    #     Returns:
+    #         Session: The Session object created.
+    #     """
+    #     data = OrchestratorParams(
+    #         agent=agent,
+    #         context_variables=context_variables,
+    #         max_turns=max_turns,
+    #         history_size=history_size,
+    #         debug=debug,
+    #     )
+    #     try:
+    #         workflow_handle = await self.client.start_workflow(
+    #             OrchestratorWorkflow.run,
+    #             data,
+    #             id=session_id,
+    #             task_queue=self.task_queue,
+    #         )
+    #         return Session(workflow_handle)
+    #     except WorkflowAlreadyStartedError:
+    #         warnings.warn(
+    #             "A session with this ID is already running. Returning the existing session.",
+    #             UserWarning,
+    #         )
+    #         workflow_handle = self.client.get_workflow_handle(session_id)
+    #         return Session(workflow_handle)

@@ -9,6 +9,9 @@ from .agent import (
     AgentToolCall,
     ExecuteFunctionParams,
     ExecuteInstructionsParams,
+    Interrupt,
+    ResumeRequest,
+    ResumeResponse,
 )
 
 try:
@@ -40,6 +43,9 @@ __all__ = [
     "AgentToolCall",
     "ExecuteFunctionParams",
     "ExecuteInstructionsParams",
+    "Interrupt",
+    "ResumeRequest",
+    "ResumeResponse",
 ]
 
 if _OPENAI_AVAILABLE_:
