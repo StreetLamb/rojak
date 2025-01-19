@@ -20,8 +20,8 @@ from rojak.agents import Agent, Interrupt
 
 @dataclass
 class OrchestratorParams:
-    type: Literal["short", "long"]
-    """Specify if it is short or long-running workflow."""
+    type: Literal["stateless", "persistent"]
+    """Specify if it is stateless or persistent workflow."""
 
     context_variables: ContextVariables = field(default_factory=dict)
     """A dictionary of additional context variables, available to functions and Agent instructions."""
@@ -100,8 +100,6 @@ class GetConfigResponse:
 
 @workflow.defn
 class OrchestratorWorkflow:
-    """Orchestrator for short-running workflows."""
-
     @workflow.init
     def __init__(self, params: OrchestratorParams) -> None:
         self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
@@ -146,7 +144,7 @@ class OrchestratorWorkflow:
 
                 await workflow.wait_condition(lambda: workflow.all_handlers_finished())
 
-                if self.type == "short":
+                if self.type == "stateless":
                     return self.responses[self.task_id]
                 else:
                     if len(self.messages) > self.history_size:

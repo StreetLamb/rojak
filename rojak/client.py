@@ -187,7 +187,7 @@ class Rojak:
             max_turns=max_turns,
             messages=messages,
             debug=debug,
-            type="short",
+            type="stateless",
         )
 
         return await self.client.create_schedule(
@@ -207,7 +207,7 @@ class Rojak:
     async def run(
         self,
         id: str,
-        type: Literal["short", "long"],
+        type: Literal["stateless", "session"],
         task: TaskParams,
         context_variables: dict = {},
         max_turns: int = float("inf"),
@@ -220,7 +220,7 @@ class Rojak:
     async def run(
         self,
         id: str,
-        type: Literal["short", "long"] | None = None,
+        type: Literal["stateless", "persistent"] | None = None,
         task: TaskParams | None = None,
         resume: ResumeResponse | None = None,
         context_variables: dict = {},
@@ -236,6 +236,7 @@ class Rojak:
 
         Args:
             id (str): Unique identifier of the orchestrator.
+            type (Literal["stateless", "persistent"] | None, optional): Whether to keep track of prior conversations through long-running workflows.
             task (TaskParams | None, optional): A task to be executed in the orchestrator. Defaults to None.
             resume (ResumeResponse | None, optional): A resume object for continuing a paused workflow. Defaults to None.
             context_variables (dict, optional): A dictionary of additional context variables available to functions
