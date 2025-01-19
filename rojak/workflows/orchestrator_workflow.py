@@ -107,15 +107,16 @@ class OrchestratorBaseWorkflow:
         self.debug = params.debug
         self.context_variables = params.context_variables
         self.current_agent_workflow: AgentWorkflow | None = None
+        self.task_id: str | None = None
 
-    async def process(self, active_agent: Agent, task_id: str) -> Agent | None:
+    async def process(self, active_agent: Agent) -> Agent | None:
         params = AgentWorkflowRunParams(
             agent=active_agent,
             messages=self.messages,
             context_variables=self.context_variables,
             debug=self.debug,
             orchestrator=self,
-            task_id=task_id,
+            task_id=self.task_id,
         )
         agent_workflow = AgentWorkflow(params)
         self.current_agent_workflow = agent_workflow
@@ -171,12 +172,14 @@ class ShortOrchestratorWorkflow(OrchestratorBaseWorkflow):
     def __init__(self, params: ShortOrchestratorParams) -> None:
         super().__init__(params)
         self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
+        self.task_id: str | None = None
 
     @workflow.run
     async def run(self, _: ShortOrchestratorParams) -> OrchestratorResponse:
         while True:
             await workflow.wait_condition(lambda: bool(self.tasks))
             task_id, task = self.tasks.popleft()
+            self.task_id = task_id
             self.messages = task.messages
             self.agent = task.agent  # Keep track of the last to be called
             self.context_variables = task
@@ -190,9 +193,9 @@ class ShortOrchestratorWorkflow(OrchestratorBaseWorkflow):
             init_len = len(self.messages)
 
             while len(self.messages) - init_len < self.max_turns and active_agent:
-                active_agent = await self.process(active_agent, task_id)
+                active_agent = await self.process(active_agent)
 
-            self.responses[task_id] = OrchestratorResponse(
+            self.responses[self.task_id] = OrchestratorResponse(
                 messages=self.messages,
                 agent=self.agent,
                 context_variables=self.context_variables,
@@ -200,7 +203,7 @@ class ShortOrchestratorWorkflow(OrchestratorBaseWorkflow):
 
             await workflow.wait_condition(lambda: workflow.all_handlers_finished())
 
-            return self.responses[task_id]
+            return self.responses[self.task_id]
 
     @workflow.update(unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON)
     async def add_task(
@@ -209,6 +212,7 @@ class ShortOrchestratorWorkflow(OrchestratorBaseWorkflow):
     ) -> OrchestratorResponse | ResumeRequest:
         task_id, task = params
         async with self.lock:
+            self.task_id = task_id
             if isinstance(task, TaskParams):
                 self.tasks.append(params)
             else:
