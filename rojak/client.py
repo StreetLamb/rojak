@@ -305,37 +305,53 @@ class Rojak:
             workflow_handle=workflow_handle,
         )
 
-    async def get_result(self, id: str, task_id: str) -> OrchestratorResponse:
-        """Get the latest response.
+    async def get_result(
+        self, id: str, task_id: str | None
+    ) -> OrchestratorResponse | ResumeRequest | None:
+        """
+        Retrieve the latest or specific task result for a workflow.
 
-        Requires a running worker.
+        Requires a running worker. If `task_id` is provided, the result of that specific task
+        is fetched; otherwise, the latest result of the workflow is returned.
+
+        Args:
+            id (str): The unique identifier of the workflow.
+            task_id (str | None): The ID of the specific task to retrieve the result for. If None, retrieves the latest result.
 
         Returns:
-            OrchestratorResponse: Response object containing updated messages and context_variables.
+            OrchestratorResponse: An object containing updated messages and context variables from the workflow.
         """
-        return await self.client.get_workflow_handle(id).query(
-            OrchestratorWorkflow.get_result, task_id
-        )
+        workflow_handle = self.client.get_workflow_handle(id)
+        if task_id is None:
+            return await workflow_handle.query(OrchestratorWorkflow.get_latest_result)
+        else:
+            return await workflow_handle.query(OrchestratorWorkflow.get_result, task_id)
 
     async def get_config(self, id: str) -> GetConfigResponse:
-        """Retrieve the current session configuration.
+        """
+        Retrieve the current configuration of a workflow session.
 
         Requires a running worker.
 
+        Args:
+            id (str): The unique identifier of the workflow session.
+
         Returns:
-            GetConfigResponse: Current session's configuration values.
+            GetConfigResponse: An object containing the current configuration values of the session.
         """
         return await self.client.get_workflow_handle(id).query(
             OrchestratorWorkflow.get_config, result_type=GetConfigResponse
         )
 
     async def update_config(self, id: str, params: UpdateConfigParams):
-        """Update the session's configuration with specified changes.
+        """
+        Update the configuration of a workflow session.
 
         Requires a running worker.
 
         Args:
-            params (UpdateConfigParams): A dictionary containing only the configuration values that need to be updated.
+            id (str): The unique identifier of the workflow session.
+            params (UpdateConfigParams): Configuration parameters to update. Only the values specified in `params` will be updated.
         """
         await self.client.get_workflow_handle(id).signal(
             OrchestratorWorkflow.update_config, params

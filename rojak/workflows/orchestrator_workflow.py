@@ -111,6 +111,7 @@ class OrchestratorWorkflow:
         self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
         self.tasks: deque[tuple[str, TaskParams]] = params.tasks
         self.responses: dict[str, OrchestratorResponse | ResumeRequest] = {}
+        self.latest_response: OrchestratorResponse | ResumeRequest | None = None
         self.max_turns = params.max_turns
         self.debug = params.debug
         self.context_variables = params.context_variables
@@ -142,11 +143,13 @@ class OrchestratorWorkflow:
                 while len(self.messages) - init_len < self.max_turns and active_agent:
                     active_agent = await self.process(active_agent)
 
-                self.responses[self.task_id] = OrchestratorResponse(
+                response = OrchestratorResponse(
                     messages=self.messages,
                     agent=self.agent,
                     context_variables=self.context_variables,
                 )
+
+                self.reply(self.task_id, response)
 
                 await workflow.wait_condition(lambda: workflow.all_handlers_finished())
 
@@ -192,6 +195,11 @@ class OrchestratorWorkflow:
                 active_agent = None
                 self.pending = False
                 continue
+
+    def reply(self, task_id: str, response: OrchestratorResponse | ResumeRequest):
+        """Return response back"""
+        self.responses[task_id] = response
+        self.latest_response = response
 
     async def process(self, active_agent: Agent) -> Agent | None:
         params = AgentWorkflowRunParams(
@@ -265,6 +273,10 @@ class OrchestratorWorkflow:
     @workflow.query
     def get_result(self, task_id: str) -> OrchestratorResponse:
         return self.responses[task_id]
+
+    @workflow.query
+    def get_latest_result(self) -> OrchestratorResponse | ResumeRequest | None:
+        return self.latest_response
 
     @workflow.query
     def get_config(self) -> GetConfigResponse:

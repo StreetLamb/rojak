@@ -247,13 +247,16 @@ class AgentWorkflow:
                 workflow.now(),
                 f"Interrupt: {interrupt.question}",
             )
-            self.orchestrator.responses[self.task_id] = ResumeRequest(
-                tool_id=tool_call.id,
-                tool_name=tool_call.function.name,
-                question=interrupt.question,
-                when=interrupt.when,
-                tool_arguments=tool_call.function.arguments,
-                task_id=self.task_id,
+            self.orchestrator.reply(
+                self.task_id,
+                ResumeRequest(
+                    tool_id=tool_call.id,
+                    tool_name=tool_call.function.name,
+                    question=interrupt.question,
+                    when=interrupt.when,
+                    tool_arguments=tool_call.function.arguments,
+                    task_id=self.task_id,
+                ),
             )
 
             await workflow.wait_condition(lambda: tool_call.id in self.resumed)
