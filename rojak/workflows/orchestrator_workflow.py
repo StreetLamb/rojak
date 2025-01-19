@@ -125,7 +125,6 @@ class OrchestratorWorkflow:
         while True:
             await workflow.wait_condition(lambda: bool(self.tasks))
             task_id, task = self.tasks.popleft()
-            print(task_id, task)
             self.task_id = task_id
             self.messages += task.messages
             self.agent = task.agent  # Keep track of the last to be called
