@@ -21,7 +21,7 @@ from rojak.agents import (
 )
 
 if TYPE_CHECKING:
-    from rojak.workflows.orchestrator_workflow import OrchestratorBaseWorkflow
+    from rojak.workflows.orchestrator_workflow import OrchestratorWorkflow
 
 try:
     from rojak.agents import OpenAIAgent
@@ -50,7 +50,7 @@ class AgentWorkflowRunParams:
     context_variables: ContextVariables
     """A dictionary of additional context variables, available to functions and Agent instructions."""
 
-    orchestrator: "OrchestratorBaseWorkflow"
+    orchestrator: "OrchestratorWorkflow"
     """The parent orchestrator that called this workflow."""
 
     task_id: str

@@ -1,5 +1,8 @@
+import copy
 from dataclasses import dataclass, field
+from typing import Literal
 from temporalio import workflow
+from temporalio.exceptions import ActivityError
 from rojak.types import ConversationMessage, ContextVariables
 from collections import deque
 import asyncio
@@ -16,7 +19,10 @@ from rojak.agents import Agent, Interrupt
 
 
 @dataclass
-class OrchestratorBaseParams:
+class OrchestratorParams:
+    type: Literal["short", "long"]
+    """Specify if it is short or long-running workflow."""
+
     context_variables: ContextVariables = field(default_factory=dict)
     """A dictionary of additional context variables, available to functions and Agent instructions."""
 
@@ -26,15 +32,8 @@ class OrchestratorBaseParams:
     debug: bool = False
     """If True, enables debug logging"""
 
-
-@dataclass
-class OrchestratorParams(OrchestratorBaseParams):
     history_size: int = field(default=10)
     """The maximum number of messages retained in the list before older messages are removed."""
-
-
-@dataclass
-class ShortOrchestratorParams(OrchestratorBaseParams): ...
 
 
 @dataclass
@@ -99,8 +98,13 @@ class GetConfigResponse:
     """If True, enables debug logging"""
 
 
-class OrchestratorBaseWorkflow:
-    def __init__(self, params: OrchestratorBaseParams):
+@workflow.defn
+class OrchestratorWorkflow:
+    """Orchestrator for short-running workflows."""
+
+    @workflow.init
+    def __init__(self, params: OrchestratorParams) -> None:
+        self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
         self.tasks: deque[tuple[str, TaskParams]] = deque()
         self.responses: dict[str, OrchestratorResponse | ResumeRequest] = {}
         self.max_turns = params.max_turns
@@ -108,6 +112,80 @@ class OrchestratorBaseWorkflow:
         self.context_variables = params.context_variables
         self.current_agent_workflow: AgentWorkflow | None = None
         self.task_id: str | None = None
+        self.history_size = params.history_size
+        self.type = params.type
+        self.messages: list[ConversationMessage] = []
+
+    @workflow.run
+    async def run(self, params: OrchestratorParams) -> OrchestratorResponse:
+        while True:
+            await workflow.wait_condition(lambda: bool(self.tasks))
+            task_id, task = self.tasks.popleft()
+            self.task_id = task_id
+            self.messages += task.messages
+            self.agent = task.agent  # Keep track of the last to be called
+
+            message = self.messages[-1]
+            debug_print(
+                self.debug, workflow.now(), f"{message.role}: {message.content}"
+            )
+
+            active_agent = self.agent
+            init_len = len(self.messages)
+            past_message_state = copy.deepcopy(self.messages)
+
+            try:
+                while len(self.messages) - init_len < self.max_turns and active_agent:
+                    active_agent = await self.process(active_agent)
+
+                self.responses[self.task_id] = OrchestratorResponse(
+                    messages=self.messages,
+                    agent=self.agent,
+                    context_variables=self.context_variables,
+                )
+
+                await workflow.wait_condition(lambda: workflow.all_handlers_finished())
+
+                if self.type == "short":
+                    return self.responses[self.task_id]
+                else:
+                    if len(self.messages) > self.history_size:
+                        messages = deque(self.messages[-self.history_size :])
+                        while messages and messages[0].role == "tool":
+                            messages.popleft()
+                        self.messages = list(messages)
+
+                    workflow_history_size = workflow.info().get_current_history_size()
+                    workflow_history_length = (
+                        workflow.info().get_current_history_length()
+                    )
+                    if (
+                        workflow_history_length > 10_000
+                        or workflow_history_size > 20_000_000
+                    ):
+                        debug_print(
+                            self.debug,
+                            workflow.now(),
+                            "Continue as new due to prevent workflow event history from exceeding limit.",
+                        )
+                        workflow.continue_as_new(
+                            args=[
+                                OrchestratorParams(
+                                    type=params.type,
+                                    context_variables=self.context_variables,
+                                    max_turns=self.max_turns,
+                                    debug=self.debug,
+                                    history_size=self.history_size,
+                                )
+                            ]
+                        )
+            except ActivityError as e:
+                # Return messages to previous state and wait for new messages
+                workflow.logger.error(f"Agent failed to complete. Error: {e}")
+                self.messages = past_message_state
+                active_agent = None
+                self.pending = False
+                continue
 
     async def process(self, active_agent: Agent) -> Agent | None:
         params = AgentWorkflowRunParams(
@@ -145,10 +223,6 @@ class OrchestratorBaseWorkflow:
 
         return active_agent
 
-    @workflow.query
-    def get_messages(self) -> list[ConversationMessage]:
-        return self.messages
-
     def resume(self, params: ResumeResponse):
         """Resumes an interrupted agent workflow for a specific tool ID."""
         if not self.current_agent_workflow:
@@ -163,49 +237,11 @@ class OrchestratorBaseWorkflow:
                 f"Cannot resume: Tool ID '{tool_id}' not found in the approval queue."
             )
 
+    @workflow.query
+    def get_messages(self) -> list[ConversationMessage]:
+        return self.messages
 
-@workflow.defn
-class ShortOrchestratorWorkflow(OrchestratorBaseWorkflow):
-    """Orchestrator for short-running workflows."""
-
-    @workflow.init
-    def __init__(self, params: ShortOrchestratorParams) -> None:
-        super().__init__(params)
-        self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
-        self.task_id: str | None = None
-
-    @workflow.run
-    async def run(self, _: ShortOrchestratorParams) -> OrchestratorResponse:
-        while True:
-            await workflow.wait_condition(lambda: bool(self.tasks))
-            task_id, task = self.tasks.popleft()
-            self.task_id = task_id
-            self.messages = task.messages
-            self.agent = task.agent  # Keep track of the last to be called
-            self.context_variables = task
-
-            message = self.messages[-1]
-            debug_print(
-                self.debug, workflow.now(), f"{message.role}: {message.content}"
-            )
-
-            active_agent = self.agent
-            init_len = len(self.messages)
-
-            while len(self.messages) - init_len < self.max_turns and active_agent:
-                active_agent = await self.process(active_agent)
-
-            self.responses[self.task_id] = OrchestratorResponse(
-                messages=self.messages,
-                agent=self.agent,
-                context_variables=self.context_variables,
-            )
-
-            await workflow.wait_condition(lambda: workflow.all_handlers_finished())
-
-            return self.responses[self.task_id]
-
-    @workflow.update(unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON)
+    @workflow.update
     async def add_task(
         self,
         params: tuple[str, TaskParams | ResumeResponse],
@@ -220,131 +256,29 @@ class ShortOrchestratorWorkflow(OrchestratorBaseWorkflow):
             await workflow.wait_condition(lambda: task_id in self.responses)
             return self.responses[task_id]
 
+    @workflow.query
+    def get_result(self, task_id: str) -> OrchestratorResponse:
+        return self.responses[task_id]
 
-# @workflow.defn
-# class OrchestratorWorkflow(OrchestratorBaseWorkflow):
-#     """Orchestrator for long-running workflows."""
+    @workflow.query
+    def get_config(self) -> GetConfigResponse:
+        return GetConfigResponse(
+            messages=self.messages,
+            context_variables=self.context_variables,
+            max_turns=self.max_turns,
+            history_size=self.history_size,
+            debug=self.debug,
+        )
 
-#     @workflow.init
-#     def __init__(self, params: OrchestratorParams) -> None:
-#         super().__init__(params)
-#         self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
-#         self.queue: deque[tuple[list[ConversationMessage], Agent]] = deque()
-#         self.pending: bool = False
-#         self.history_size: int = params.history_size
-#         # Stores latest response
-#         self.result: OrchestratorResponse = OrchestratorResponse([], None, {})
-
-#     @workflow.run
-#     async def run(self, params: OrchestratorParams) -> OrchestratorResponse:
-#         while True:
-#             await workflow.wait_condition(lambda: bool(self.queue))
-#             messages, agent = self.queue.popleft()
-#             past_message_state = copy.deepcopy(self.messages)
-#             self.messages += messages
-
-#             for message in messages:
-#                 debug_print(
-#                     self.debug, workflow.now(), f"{message.role}: {message.content}"
-#                 )
-
-#             active_agent = self.agent = agent
-#             init_len = len(self.messages)
-
-#             try:
-#                 while len(self.messages) - init_len < self.max_turns and active_agent:
-#                     active_agent = await self.process(active_agent)
-
-#                 self.result = OrchestratorResponse(
-#                     messages=self.messages,
-#                     agent=self.agent,
-#                     context_variables=self.context_variables,
-#                 )
-#                 self.pending = False
-
-#                 # Wait for all handlers to finish before checking if messages exceed limits
-#                 await workflow.wait_condition(lambda: workflow.all_handlers_finished())
-
-#                 # Summarise chat and start new workflow if messages exceeds `history_size` limit
-#                 if len(self.messages) > self.history_size:
-#                     self.messages = self.messages[-self.history_size :]
-
-#                 workflow_history_size = workflow.info().get_current_history_size()
-#                 workflow_history_length = workflow.info().get_current_history_length()
-#                 if (
-#                     workflow_history_length > 10_000
-#                     or workflow_history_size > 20_000_000
-#                 ):
-#                     debug_print(
-#                         self.debug,
-#                         workflow.now(),
-#                         "Continue as new due to prevent workflow event history from exceeding limit.",
-#                     )
-#                     workflow.continue_as_new(
-#                         args=[
-#                             OrchestratorParams(
-#                                 agent=self.agent,
-#                                 history_size=self.history_size,
-#                                 max_turns=self.max_turns,
-#                                 context_variables=self.context_variables,
-#                                 messages=self.messages,
-#                                 debug=self.debug,
-#                             )
-#                         ]
-#                     )
-#             except (ChildWorkflowError, ActivityError) as e:
-#                 # Return messages to previous state and wait for new messages
-#                 match e:
-#                     case ChildWorkflowError():
-#                         workflow.logger.error(
-#                             f"Failed to run agent workflow. Error: {e}"
-#                         )
-#                         self.messages = past_message_state
-#                         print("Revert messages to previous state.")
-#                     case ActivityError():
-#                         workflow.logger.error(
-#                             f"Failed to summarise messages. Error: {e}"
-#                         )
-#                     case _:
-#                         workflow.logger.error(f"Unexpected error. Error: {e}")
-#                 active_agent = None
-#                 self.pending = False
-#                 continue
-
-#     @workflow.update(unfinished_policy=workflow.HandlerUnfinishedPolicy.ABANDON)
-#     async def send_messages(
-#         self,
-#         params: SendMessagesParams,
-#     ) -> OrchestratorResponse:
-#         async with self.lock:
-#             self.pending = True
-#             self.queue.append((params.messages, params.agent))
-#             await workflow.wait_condition(lambda: self.pending is False)
-#             return self.result
-
-#     @workflow.query
-#     def get_result(self) -> OrchestratorResponse:
-#         return self.result
-
-#     @workflow.query
-#     def get_config(self) -> GetConfigResponse:
-#         return GetConfigResponse(
-#             messages=self.messages,
-#             context_variables=self.context_variables,
-#             max_turns=self.max_turns,
-#             history_size=self.history_size,
-#             debug=self.debug,
-#         )
-
-#     @workflow.signal
-#     def update_config(self, params: UpdateConfigParams):
-#         if params.messages is not None:
-#             self.messages = params.messages
-#         if params.context_variables is not None:
-#             self.context_variables = params.context_variables
-#         if params.max_turns is not None:
-#             self.max_turns = params.max_turns
-#         if params.history_size is not None:
-#             self.history_size = params.history_size
-#         if params.debug is not None:
-#             self.debug = params.debug
+    @workflow.signal
+    def update_config(self, params: UpdateConfigParams):
+        if params.messages is not None:
+            self.messages = params.messages
+        if params.context_variables is not None:
+            self.context_variables = params.context_variables
+        if params.max_turns is not None:
+            self.max_turns = params.max_turns
+        if params.history_size is not None:
+            self.history_size = params.history_size
+        if params.debug is not None:
+            self.debug = params.debug
