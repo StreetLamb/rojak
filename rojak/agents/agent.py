@@ -137,10 +137,10 @@ class Interrupt:
     tool_name: str
     """The name of the tool to interrupt."""
 
-    question: str
+    question: str = ""
     """The question to ask the user."""
 
-    when: Literal["before"]
+    when: Literal["before"] = "before"
     """When the interrupt should be triggered."""
 
 
