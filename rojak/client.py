@@ -207,7 +207,7 @@ class Rojak:
     async def run(
         self,
         id: str,
-        type: Literal["stateless", "session"],
+        type: Literal["stateless", "persistent"],
         task: TaskParams,
         context_variables: dict = {},
         max_turns: int = float("inf"),
