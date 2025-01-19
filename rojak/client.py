@@ -1,3 +1,4 @@
+from collections import deque
 from dataclasses import dataclass
 from typing import AsyncIterator, Literal, overload
 from temporalio.client import (
@@ -11,22 +12,22 @@ from temporalio.client import (
 )
 from temporalio import workflow, common
 from temporalio.worker import Worker
-from rojak.types import ConversationMessage, MCPServerConfig, InitMcpResult
+from rojak.types import MCPServerConfig, InitMcpResult
 
 with workflow.unsafe.imports_passed_through():
     from mcp import Tool
     from rojak.retrievers import RetrieverActivities
-    from rojak.agents import Agent, AgentActivities
-    from rojak.mcp.mcp_client import MCPClient
+    from rojak.agents import AgentActivities
+    from rojak.mcp import MCPClient
     from rojak.workflows import (
         OrchestratorResponse,
         OrchestratorParams,
         OrchestratorWorkflow,
         GetConfigResponse,
         UpdateConfigParams,
+        TaskParams,
     )
-    from rojak.workflows.agent_workflow import ResumeRequest, ResumeResponse
-    from rojak.workflows.orchestrator_workflow import TaskParams
+    from rojak.agents import ResumeRequest, ResumeResponse
     from uuid import uuid4
 
 
@@ -159,35 +160,37 @@ class Rojak:
         self,
         schedule_id: str,
         schedule_spec: ScheduleSpec,
-        agent: Agent,
-        messages: list[ConversationMessage],
+        task: TaskParams,
         context_variables: dict = {},
         max_turns: int = float("inf"),
+        history_size: int = 10,
         debug: bool = False,
     ) -> ScheduleHandle:
-        """Create a schedule and return its handle.
+        """
+        Create a schedule that periodically executes a workflow.
 
-        The schedule periodically executes the equivalent of the `run()` method with the provided inputs.
+        The schedule periodically executes the equivalent of the `run()` method with the provided task, context variables, and configuration.
 
         Args:
-            schedule_id (str): Unique identifier of the schedule.
-            schedule_spec (ScheduleSpec): Specification on when the action is taken.
-            agent (Agent): The initial agent to be called.
-            messages (list[ConversationMessage]): A list of message objects.
-            context_variables (dict, optional): A dictionary of additional context variables, available to functions and Agent instructions. Defaults to {}.
-            max_turns (int, optional): The maximum number of conversational turns allowed. Defaults to float("inf").
-            debug (bool, optional): If True, enables debug logging. Defaults to False.
+            schedule_id (str): Unique identifier for the schedule.
+            schedule_spec (ScheduleSpec): Specifies when the schedule executes, such as a cron schedule or interval.
+            task (TaskParams): Encapsulates the agent, messages, and parameters for the workflow to run.
+            context_variables (dict, optional): Additional variables available to functions and agent instructions. Defaults to {}.
+            max_turns (int, optional): The maximum number of conversational turns allowed in the workflow. Defaults to float("inf").
+            history_size (int, optional): The maximum number of messages retained in the conversation history. Defaults to 10.
+            debug (bool, optional): Enables debug logging if True. Defaults to False.
 
         Returns:
-            ScheduleHandle: A handle to the created schedule.
+            ScheduleHandle: A handle to the created schedule, allowing management such as pausing, resuming, or deleting.
         """
+        task_id = str(uuid4())
         data = OrchestratorParams(
-            agent=agent,
             context_variables=context_variables,
             max_turns=max_turns,
-            messages=messages,
+            tasks=deque([(task_id, task)]),
             debug=debug,
             type="stateless",
+            history_size=history_size,
         )
 
         return await self.client.create_schedule(

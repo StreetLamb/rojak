@@ -38,6 +38,9 @@ class OrchestratorParams:
     messages: list[ConversationMessage] = field(default_factory=list)
     """List of conversation messages to initialise workflow with."""
 
+    tasks: deque[tuple[str, "TaskParams"]] = field(default_factory=deque)
+    """Tasks queue to initialise workflow with."""
+
 
 @dataclass
 class OrchestratorResponse:
@@ -106,7 +109,7 @@ class OrchestratorWorkflow:
     @workflow.init
     def __init__(self, params: OrchestratorParams) -> None:
         self.lock = asyncio.Lock()  # Prevent concurrent update handler executions
-        self.tasks: deque[tuple[str, TaskParams]] = deque()
+        self.tasks: deque[tuple[str, TaskParams]] = params.tasks
         self.responses: dict[str, OrchestratorResponse | ResumeRequest] = {}
         self.max_turns = params.max_turns
         self.debug = params.debug
@@ -122,6 +125,7 @@ class OrchestratorWorkflow:
         while True:
             await workflow.wait_condition(lambda: bool(self.tasks))
             task_id, task = self.tasks.popleft()
+            print(task_id, task)
             self.task_id = task_id
             self.messages += task.messages
             self.agent = task.agent  # Keep track of the last to be called
@@ -178,6 +182,7 @@ class OrchestratorWorkflow:
                                     debug=self.debug,
                                     history_size=self.history_size,
                                     messages=self.messages,
+                                    tasks=self.tasks,
                                 )
                             ]
                         )
