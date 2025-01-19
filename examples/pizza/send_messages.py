@@ -45,8 +45,8 @@ async def main():
 
         if state == "Response":
             response = await rojak.run(
-                SESSION_ID,
-                "long",
+                id=SESSION_ID,
+                type="persistent",
                 task=TaskParams(
                     messages=[{"role": "user", "content": prompt}], agent=agent
                 ),
