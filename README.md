@@ -738,7 +738,7 @@ This feature ensures that humans can seamlessly intervene in workflows to mainta
 Use interrupts to identify points in the workflow where human intervention is required. For example, you can configure an interrupt to pause the workflow when a specific tool is invoked.
 
 ```python
-from rojak.types.types import Interrupt
+from rojak.agent import Interrupt
 
  agent = OpenAIAgent(
      name="Agent A",
