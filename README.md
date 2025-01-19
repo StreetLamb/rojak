@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/d61b8893-3c33-4002-bca9-740f403f51f1
 - 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
 - 🗂️ **State Management** - Messages, contexts and other states are automatically managed and preserved, even during failures. No complex database transactions required.
 - 🤝 **MCP Support** - Supports calling tools via Model Context Protocol (MCP) servers.
+- 🧑‍💻 **Human-In-The-Loop** - Integrates human intervention for approving, rejecting, or modifying tool invocations and decisions, ensuring control over critical workflows.
 - 📈 **Scalable** - Manage unlimited agents, and handle multiple chat sessions in parallel.
 - ⏰ **Scheduling** - Schedule to run your agents at specific times, days, date or intervals.
 - 👁️ **Visiblity** - Track your agents’ past and current actions in real time through a user-friendly browser-based UI.
@@ -50,6 +51,10 @@ https://github.com/user-attachments/assets/d61b8893-3c33-4002-bca9-740f403f51f1
     - [`rojak.create_schedule()`](#rojakcreate_schedule)
       - [Arguments](#arguments-1)
     - [`rojak.list_scheduled_runs()`](#rojaklist_scheduled_runs)
+  - [Human In The Loop](#human-in-the-loop)
+    - [Define Interrupts](#define-interrupts)
+    - [Handling Interrupts](#handling-interrupts)
+    - [Resuming workflows](#resuming-workflows)
   - [Model Context Protocol (MCP) Servers](#model-context-protocol-mcp-servers)
 
 ## Install
@@ -166,7 +171,7 @@ Basic examples can be found in the `/examples` directory:
 
 - [`weather`](examples/weather/): A straightforward example demonstrating tool calling and the use of `context_variables`.
 - [`mcp_weather`](examples/mcp_weather/) An example demonstrating connecting to MCP servers and executing tools through them.
-- [`pizza`](examples/pizza/) A complete example demonstrating using multiple agents to assist users in ordering food.
+- [`pizza`](examples/pizza/) A comprehensive example showcasing the use of multiple agents with human-in-the-loop interventions to help users seamlessly order food.
 
 
 # Understanding Rojak’s Architecture
@@ -723,6 +728,51 @@ async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Compl
 ```
 Hello! How can I assist you today?
 ```
+
+## Human In The Loop
+
+This feature ensures that humans can seamlessly intervene in workflows to maintain control over critical decisions. This is especially useful in scenarios requiring validation, approval, or manual oversight before proceeding with automated tasks.
+
+### Define Interrupts
+
+Use interrupts to identify points in the workflow where human intervention is required. For example, you can configure an interrupt to pause the workflow when a specific tool is invoked.
+
+```python
+from rojak.types.types import Interrupt
+
+ agent = OpenAIAgent(
+     name="Agent A",
+     functions=["process_payment"],
+     interrupts=[Interrupt("process_payment")],
+ )
+```
+
+### Handling Interrupts
+
+When an interrupt is triggered, Rojak pauses the workflow and returns a ResumeRequest, prompting the human to decide whether to approve or reject the tool invocation.
+
+```python
+if isinstance(response.result, ResumeRequest):
+    print(f"Interrupt triggered: {response.result.tool_name}")
+    resume_response = ResumeResponse(action="approve", tool_id=response.result.tool_id)
+    final_response = await rojak.run(
+        id="workflow_id",
+        resume=resume_response,
+    )
+```
+
+### Resuming workflows
+
+Based on the human’s decision, the workflow either continues execution (on approval) or skips the interrupted action (on rejection) and retry again. Optional feedback can be provided during rejection to inform the agent.
+
+```python
+reject_response = ResumeResponse(
+    action="reject",
+    tool_id=response.result.tool_id,
+    content="The tool call is unnecessary."
+)
+```
+
 
 ## Model Context Protocol (MCP) Servers
 
