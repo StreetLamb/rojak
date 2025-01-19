@@ -145,7 +145,7 @@ class Interrupt:
 
 
 @dataclass
-class ResumeRequest(Interrupt):
+class ResumeRequest:
     """Request to resume the interrupted agent."""
 
     tool_id: str
@@ -156,6 +156,15 @@ class ResumeRequest(Interrupt):
 
     task_id: str
     """Unique identifier of the request that triggered the interrupt."""
+
+    tool_name: str
+    """The name of the tool to interrupt."""
+
+    question: str = ""
+    """The question to ask the user."""
+
+    when: Literal["before"] = "before"
+    """When the interrupt should be triggered."""
 
 
 @dataclass

@@ -211,6 +211,7 @@ class Rojak:
         task: TaskParams,
         context_variables: dict = {},
         max_turns: int = float("inf"),
+        history_size: int = 10,
         debug: bool = False,
     ) -> RunResponse: ...
 
