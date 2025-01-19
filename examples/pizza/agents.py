@@ -1,4 +1,5 @@
 from rojak.agents import OpenAIAgent
+from rojak.agents import Interrupt
 from rojak.types import RetryOptions, RetryPolicy
 
 
@@ -18,6 +19,11 @@ triage_agent = OpenAIAgent(
     functions=["to_food_order", "to_payment", "to_feedback"],
     tool_choice="required",
     retry_options=retry_options,
+    interrupts=[
+        Interrupt("to_food_order"),
+        Interrupt("to_payment"),
+        Interrupt("to_feedback"),
+    ],
 )
 
 food_order_agent = OpenAIAgent(
@@ -44,7 +50,12 @@ payment_agent = OpenAIAgent(
     Always maintain a courteous and professional tone, ensuring customers feel supported throughout the payment process. 
     Redirect customers to the Triage Agent if they need help with non-payment tasks.
     """,
-    functions=["to_triage", "process_payment", "get_receipt"],
+    functions=[
+        "to_triage",
+        "process_payment",
+        "get_receipt",
+        "get_cart",
+    ],
     retry_options=retry_options,
 )
 

@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/d61b8893-3c33-4002-bca9-740f403f51f1
 - 🛡️ **Durable and Fault-Tolerant** - Agents always completes, even when the server crashes or managing long-running tasks that span weeks, months, or even years.
 - 🗂️ **State Management** - Messages, contexts and other states are automatically managed and preserved, even during failures. No complex database transactions required.
 - 🤝 **MCP Support** - Supports calling tools via Model Context Protocol (MCP) servers.
+- 🧑‍💻 **Human-In-The-Loop** - Integrates human intervention for approving, rejecting, or modifying tool invocations and decisions, ensuring control over critical workflows.
 - 📈 **Scalable** - Manage unlimited agents, and handle multiple chat sessions in parallel.
 - ⏰ **Scheduling** - Schedule to run your agents at specific times, days, date or intervals.
 - 👁️ **Visiblity** - Track your agents’ past and current actions in real time through a user-friendly browser-based UI.
@@ -32,8 +33,12 @@ https://github.com/user-attachments/assets/d61b8893-3c33-4002-bca9-740f403f51f1
 - [Running Rojak](#running-rojak)
     - [Workers](#workers)
     - [`rojak.run()`](#rojakrun)
-      - [Arguments](#arguments)
+    - [Arguments](#arguments)
+    - [`ResumeResponse` Fields](#resumeresponse-fields)
+    - [Return Value](#return-value)
+      - [`RunResponse` Fields](#runresponse-fields)
       - [`OrchestratorResponse` Fields](#orchestratorresponse-fields)
+      - [`ResumeRequest` Fields](#resumerequest-fields)
   - [Agents](#agents)
     - [`Agent` Abstract Class Fields](#agent-abstract-class-fields)
     - [Instructions](#instructions)
@@ -42,18 +47,14 @@ https://github.com/user-attachments/assets/d61b8893-3c33-4002-bca9-740f403f51f1
     - [Function Schemas](#function-schemas)
     - [Retrievers](#retrievers)
     - [Timeouts and Retries](#timeouts-and-retries)
-  - [Sessions](#sessions)
-    - [`rojak.create_session()`](#rojakcreate_session)
-      - [Arguments](#arguments-1)
-    - [`session.get_session()`](#sessionget_session)
-      - [Arguments](#arguments-2)
-    - [`session.send_messages()`](#sessionsend_messages)
-      - [Arguments](#arguments-3)
-    - [Other Session methods](#other-session-methods)
   - [Schedules](#schedules)
     - [`rojak.create_schedule()`](#rojakcreate_schedule)
-      - [Arguments](#arguments-4)
+      - [Arguments](#arguments-1)
     - [`rojak.list_scheduled_runs()`](#rojaklist_scheduled_runs)
+  - [Human In The Loop](#human-in-the-loop)
+    - [Define Interrupts](#define-interrupts)
+    - [Handling Interrupts](#handling-interrupts)
+    - [Resuming workflows](#resuming-workflows)
   - [Model Context Protocol (MCP) Servers](#model-context-protocol-mcp-servers)
 
 ## Install
@@ -90,11 +91,12 @@ temporal server start-dev
 
 ```python
 # main.py
-
 import asyncio
+import uuid
 from temporalio.client import Client
 from rojak import Rojak
 from rojak.agents import OpenAIAgentActivities, OpenAIAgentOptions, OpenAIAgent
+from rojak.workflows import TaskParams
 
 def transfer_to_agent_b():
     """Handoff to Agent B"""
@@ -116,26 +118,31 @@ async def main():
     # Connect to the Temporal service
     temporal_client = await Client.connect("localhost:7233")
 
-    # Initialise the Rojak client.
+    # Initialize the Rojak client
     rojak = Rojak(temporal_client, task_queue="tasks")
 
     # Configure agent activities
     openai_activities = OpenAIAgentActivities(
         OpenAIAgentOptions(
-            # Replace with your OpenAI API key or specify OPENAI_API_KEY in .env 
-            api_key="YOUR_API_KEY_HERE",
+            api_key="YOUR_API_KEY_HERE",  # Replace with your OpenAI API key or specify OPENAI_API_KEY in .env 
             all_functions=[transfer_to_agent_b]
         )
     )
 
-    worker = await rojak.create_worker(agent_activities=[openai_activities])
+    # Create a worker for handling agent activities
+    worker = await rojak.create_worker([openai_activities])
+
     async with worker:
+        # Run the workflow with agent A and a handoff to agent B
         response = await rojak.run(
-            id="unique-id",
-            agent=agent_a,
-            messages=[{"role": "user", "content": "I want to talk to agent B."}]
+            id=str(uuid.uuid4()),
+            type="stateless",
+            task=TaskParams(
+                agent=agent_a,
+                messages=[{"role": "user", "content": "I want to talk to agent B."}]
+            ),
         )
-        print(response.messages[-1].content)
+        print(response.result.messages[-1].content)
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -164,7 +171,7 @@ Basic examples can be found in the `/examples` directory:
 
 - [`weather`](examples/weather/): A straightforward example demonstrating tool calling and the use of `context_variables`.
 - [`mcp_weather`](examples/mcp_weather/) An example demonstrating connecting to MCP servers and executing tools through them.
-- [`pizza`](examples/pizza/) A complete example demonstrating using multiple agents to assist users in ordering food.
+- [`pizza`](examples/pizza/) A comprehensive example showcasing the use of multiple agents with human-in-the-loop interventions to help users seamlessly order food.
 
 
 # Understanding Rojak’s Architecture
@@ -235,39 +242,84 @@ await worker.run()
 
 ### `rojak.run()`
 
-Rojak's `run()` function takes `messages` and return `messages` and save no state between calls. Importantly, however, it also handles Agent function execution, hand-offs, context variable references, and can take multiple turns before returning to the user.
+Rojak's `run()` function orchestrates interactions between agents, tools, and context variables, handling multi-turn conversations and tool interruptions. It allows chaining conversations by returning updated states (messages, context variables, and agents), which can be passed into subsequent calls for continuity.
 
-At its core, Rojak's `rojak.run()` implements the following loop:
+At its core, Rojak's `run()` executes the following loop:
 
-1. Get a completion from the current Agent
-2. Execute tool calls and append results
-3. Switch Agent if necessary
-4. Update context variables, if necessary
-5. If no new function calls, return
+1. Generate a completion from the current agent.
+2. Execute tool calls if needed and append results.
+3. Handle agent hand-offs or context updates as necessary.
+4. Trigger interruptions (if specified) for approval or rejection.
+5. Return the response when all actions are complete or no further actions are needed.
+
+The process may involve multiple turns before returning a final response, depending on the interaction's complexity.
+
+### Arguments
+
+| Argument              | Type             | Description                                                                                    | Default        |
+| --------------------- | ---------------- | ---------------------------------------------------------------------------------------------- | -------------- |
+| **id**                | `str`            | Unique identifier for the interaction, enabling tracking and continuity across calls.          | (required)     |
+| **type**              | `str`            | The run type, either `"persistent"` (multi-turn stateful) or `"stateless"` (single-turn).      | `None`         |
+| **task**              | `TaskParams`     | Defines the input task for the orchestrator, including agent, messages, and other parameters.  | `None`         |
+| **resume**            | `ResumeResponse` | Allows resuming a paused workflow or interrupt, specifying the action (`approve` or `reject`). | `None`         |
+| **context_variables** | `dict`           | A dictionary of additional context variables, accessible by agents and tools during execution. | `{}`           |
+| **max_turns**         | `int`            | The maximum number of conversational turns allowed before returning the final result.          | `float("inf")` |
+| **debug**             | `bool`           | Enables debug logging when set to `True`.                                                      | `False`        |
+
+**Notes:**
+- **`task`** is required for starting a new interaction or adding new user messages.
+- **`resume`** is used to continue an interrupted interaction (e.g., after an approval/rejection).
+- **`type`** must be specified as `"persistent"` for multi-turn interactions; otherwise, the default is `"stateless"`.
+
+### `ResumeResponse` Fields
+
+The `ResumeResponse` object is used to handle interrupts in a workflow by specifying the action to take on a interrupted tool invocation. It allows users to either approve or reject the tool call, with optional feedback provided when rejecting.
+
+| Field       | Type                      | Description                                                          |
+| ----------- | ------------------------- | -------------------------------------------------------------------- |
+| **action**  | `"approve"` or `"reject"` | The action to take on the interrupt.                                 |
+| **tool_id** | `str`                     | The ID of the tool call to resume.                                   |
+| **content** | `str` or `None`           | Feedback to provide to the agent when rejecting the call (optional). |
+
+---
+### Return Value
+
+`rojak.run()` returns a `RunResponse` object that encapsulates:
+
+1. The result of the interaction (`OrchestratorResponse` or `ResumeRequest`).
+2. The task ID used during the interaction.
+3. The workflow handle for the orchestrator.
 
 
-#### Arguments
+#### `RunResponse` Fields
 
-| Argument              | Type    | Description                                                                                                                                            | Default        |
-| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------- |
-| **id**                | `str`   | Unique identifier of the run.                                                                                                                          | (required)     |
-| **agent**             | `Agent` | The (initial) agent to be called.                                                                                                                      | (required)     |
-| **messages**          | `List`  | A list of message objects, identical to [Chat Completions `messages`](https://platform.openai.com/docs/api-reference/chat/create#chat-create-messages) | (required)     |
-| **context_variables** | `dict`  | A dictionary of additional context variables, available to functions and Agent instructions                                                            | `{}`           |
-| **max_turns**         | `int`   | The maximum number of conversational turns allowed                                                                                                     | `float("inf")` |
-| **debug**             | `bool`  | If `True`, enables debug logging                                                                                                                       |
-
-
-Once `rojak.run()` is finished (after potentially multiple calls to agents and tools) it will return a Response containing all the relevant updated state. Specifically, the new messages, the last Agent to be called, and the most up-to-date context_variables. You can pass these values (plus new user messages) in to your next execution of `rojak.run()` to continue the interaction where it left off.
+| Field               | Type                                      | Description                                                                              |
+| ------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **id**              | `str`                                     | Unique identifier of the workflow.                                                       |
+| **result**          | `OrchestratorResponse` or `ResumeRequest` | The final response from the orchestrator or a request to resume an interrupted workflow. |
+| **task_id**         | `str`                                     | A unique identifier for the task, used for tracking and querying results.                |
+| **workflow_handle** | `WorkflowHandle`                          | A handle to the orchestrator workflow, allowing advanced operations.                     |
 
 
 #### `OrchestratorResponse` Fields
 
-| Field                 | Type    | Description                                                                                                                                                 |
-| --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **messages**          | `List`  | A list of message objects generated during the conversation. Message object contains a `sender` field indicating which `Agent` the message originated from. |
-| **agent**             | `Agent` | The last agent to handle a message.                                                                                                                         |
-| **context_variables** | `dict`  | The same as the input variables, plus any changes.                                                                                                          |
+| Field                 | Type    | Description                                                                                                                     |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **messages**          | `List`  | A list of messages generated during the interaction. Each message includes a `sender` field indicating the originating `Agent`. |
+| **agent**             | `Agent` | The last agent to handle a message during the interaction.                                                                      |
+| **context_variables** | `dict`  | The updated context variables, incorporating changes made by tools, agents, or user inputs.                                     |
+
+
+#### `ResumeRequest` Fields
+
+| Field              | Type       | Description                                                                                  |
+| ------------------ | ---------- | -------------------------------------------------------------------------------------------- |
+| **tool_id**        | `str`      | The ID of the tool that was interrupted.                                                     |
+| **tool_arguments** | `str`      | Arguments that will be passed to the tool when resumed.                                      |
+| **task_id**        | `str`      | Unique identifier of the request that triggered the interrupt.                               |
+| **tool_name**      | `str`      | The name of the tool that was interrupted.                                                   |
+| **question**       | `str`      | A question to ask the user regarding the interrupt.                                          |
+| **when**           | `"before"` | Specifies when the interrupt should be triggered (`"before"` is the default and only value). |
 
 
 ## Agents
@@ -283,16 +335,17 @@ Available built-in `Agent` classes:
 
 ### `Agent` Abstract Class Fields
 
-| Field                   | Type                               | Description                                                                              | Default                          |
-| ----------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------- |
-| **model**               | `str`                              | The model to be used by the agent.                                                       | (required)                       |
-| **name**                | `str`                              | The name of the agent.                                                                   | `"Agent"`                        |
-| **instructions**        | `str` or `AgentInstructionOptions` | Instructions for the agent, can be a string or a dict representing the function to call. | `"You are a helpful assistant."` |
-| **functions**           | `List[str]`                        | A list of function names that the agent can call.                                        | `[]`                             |
-| **tool_choice**         | `Any`                              | The tool choice for the agent, if any.                                                   | `None`                           |
-| **parallel_tool_calls** | `bool`                             | Whether model should perform multiple tool calls together.                               | `True`                           |
-| **retriever**           | `Retriever`                        | Specify which retriever to use.                                                          | `None`                           |
-| **retry_options**       | `RetryOptions`                     | Options for timeout and retries.                                                         | `None`                           |
+| Field                   | Type                               | Description                                                                   | Default                          |
+| ----------------------- | ---------------------------------- | ----------------------------------------------------------------------------- | -------------------------------- |
+| **model**               | `str`                              | The LLM model to be used by the agent.                                        | (required)                       |
+| **name**                | `str`                              | The name of the agent.                                                        | `"Agent"`                        |
+| **instructions**        | `str` or `AgentInstructionOptions` | Instructions for the agent, can be a string or a callable returning a string. | `"You are a helpful assistant."` |
+| **functions**           | `list[str]`                        | A list of function names that the agent can call.                             | `[]`                             |
+| **tool_choice**         | `Any`                              | The tool choice for the agent, if any.                                        | `None`                           |
+| **parallel_tool_calls** | `bool`                             | Whether the model should perform multiple tool calls together.                | `True`                           |
+| **interrupts**          | `list[Interrupt]`                  | A list of interrupts for reviewing tool use.                                  | `[]`                             |
+| **retriever**           | `Retriever`                        | Specify which retriever to use.                                               | `None`                           |
+| **retry_options**       | `RetryOptions`                     | Options for timeout and retries.                                              | `RetryOptions()`                 |
 
 
 ### Instructions
@@ -308,8 +361,13 @@ agent = OpenAIAgent(
 The `instructions` can either be a regular `str`, or a function that returns a `str`. The function can optionally receive a `context_variables` parameter, which will be populated by the `context_variables` passed into `rojak.run()`.
 
 ```python
+from rojak import Rojak
+from rojak.agents import OpenAIAgent, OpenAIAgentActivities, OpenAIAgentOptions
+from rojak.workflows import TaskParams
+import uuid
+
 def instructions_fn(context_variables):
-    user_name = context_variables["user_name"]
+    user_name = context_variables.get("user_name", "User")
     return f"Help the user, {user_name}, do whatever they want."
 
 openai_activities = OpenAIAgentActivities(
@@ -318,7 +376,7 @@ openai_activities = OpenAIAgentActivities(
     )
 )
 
-rojak = Rojak(temporal_client, task_queue="tasks")
+rojak = Rojak(client=temporal_client, task_queue="tasks")
 worker = await rojak.create_worker([openai_activities])
 
 async with worker:
@@ -326,15 +384,25 @@ async with worker:
         instructions={
             "type": "function", 
             "name": "instructions_fn"
-        } # Specify to use the `instruction_fn`
+        }  # Specify to use the `instructions_fn`
     )
-    response = await rojak.run(
-        id=str(uuid.uuid4()),
+
+    task = TaskParams(
         agent=agent,
-        messages=[{"role":"user", "content": "Hi!"}],
-        context_variables={"user_name":"John"}
+        messages=[{"role": "user", "content": "Hi!"}],
+        context_variables={"user_name": "John"},
     )
-    print(response.messages[-1]["content"])
+
+    response = await rojak.run(
+        id=str(uuid.uuid4()),  # Unique identifier for the workflow
+        type="stateless",  # Specify the workflow type
+        task=task,
+    )
+
+    if isinstance(response.result, OrchestratorResponse):
+        print(response.result.messages[-1].content)
+    else:
+        print("Unexpected result:", response.result)
 ```
 
 ```
@@ -351,32 +419,47 @@ Hi John, how can I assist you today?
 - If multiple functions are called by the `Agent`, they will be executed in that order.
 
 ```python
+from rojak import Rojak
+from rojak.agents import OpenAIAgent, OpenAIAgentActivities, OpenAIAgentOptions
+from rojak.workflows import TaskParams
+import uuid
+
 def greet(context_variables, language):
-   user_name = context_variables["user_name"]
-   greeting = "Hola" if language.lower() == "spanish" else "Hello"
-   print(f"{greeting}, {user_name}!")
-   return "Done"
+    user_name = context_variables.get("user_name", "User")
+    greeting = "Hola" if language.lower() == "spanish" else "Hello"
+    print(f"{greeting}, {user_name}!")
+    return "Done"
 
 openai_activities = OpenAIAgentActivities(
     OpenAIAgentOptions(
-        all_functions=[greet]  # Register the greet function
+        all_functions=[greet]
     )
 )
 
-rojak = Rojak(temporal_client, task_queue="tasks")
+rojak = Rojak(client=temporal_client, task_queue="tasks")
 worker = await rojak.create_worker([openai_activities])
 
 async with worker:
     agent = OpenAIAgent(
         functions=["greet"]
     )
-    response = await rojak.run(
-        id=str(uuid.uuid4()),
+
+    task = TaskParams(
         agent=agent,
         messages=[{"role": "user", "content": "Usa greet() por favor."}],
         context_variables={"user_name": "John"}
     )
-    print(response.messages[-1]["content"])
+
+    response = await rojak.run(
+        id=str(uuid.uuid4()),
+        type="stateless",
+        task=task,
+    )
+
+    if isinstance(response.result, OrchestratorResponse):
+        print(response.result.messages[-1].content)
+    else:
+        print("Unexpected result:", response.result)
 ```
 
 ```
@@ -391,12 +474,10 @@ An `Agent` can hand off to another `Agent` by returning it in a `function`.
 sales_agent = OpenAIAgent(name="Sales Agent")
 
 def transfer_to_sales():
-   return sales_agent
+    return sales_agent
 
 openai_activities = OpenAIAgentActivities(
-    OpenAIAgentOptions(
-        all_functions=[transfer_to_sales]  # Register the function
-    )
+    OpenAIAgentOptions(all_functions=[transfer_to_sales])
 )
 
 rojak = Rojak(temporal_client, task_queue="tasks")
@@ -404,12 +485,15 @@ worker = await rojak.create_worker([openai_activities])
 
 async with worker:
     agent = OpenAIAgent(functions=["transfer_to_sales"])
-    response = rojak.run(
+    response = await rojak.run(
         id=str(uuid.uuid4()),
-        agent=agent, 
-        messages=[{"role":"user", "content":"Transfer me to sales."}])
-
-    print(response.agent.name)
+        type="stateless",
+        task=TaskParams(
+            agent=agent,
+            messages=[{"role": "user", "content": "Transfer me to sales."}],
+        ),
+    )
+    print(response.result.agent.name)
 ```
 
 ```
@@ -419,36 +503,41 @@ Sales Agent
 It can also update the `context_variables` by returning a more complete `Result` object. This can also contain a `value` and an `agent`, in case you want a single function to return a value, update the agent, and update the context variables (or any subset of the three).
 
 ```python
-from rojak.agents import AgentExecuteFnResult
+from rojak import Rojak
+from rojak.agents import OpenAIAgent, OpenAIAgentActivities, OpenAIAgentOptions, AgentExecuteFnResult
+from rojak.workflows import TaskParams
+import uuid
 
-def talk_to_sales():
-   print("Hello, World!")
-   return AgentExecuteFnResult(
-       value="Done",
-       agent=sales_agent,
-       context_variables={"department": "sales"}
-   )
+sales_agent = OpenAIAgent(name="Sales Agent")
+
+def talk_to_sales(context_variables):
+    print("Hello, World!")
+    return AgentExecuteFnResult(
+        output="Done",
+        agent=sales_agent,
+        context_variables={**context_variables, "department": "sales"}
+    )
 
 openai_activities = OpenAIAgentActivities(
-    OpenAIAgentOptions(
-        all_functions=[talk_to_sales]  # Register the function
-    )
+    OpenAIAgentOptions(all_functions=[talk_to_sales])
 )
 
-rojak = Rojak(temporal_client, task_queue="tasks")
+rojak = Rojak(client=temporal_client, task_queue="tasks")
 worker = await rojak.create_worker([openai_activities])
 
 async with worker:
     agent = OpenAIAgent(functions=["talk_to_sales"])
-    sales_agent = OpenAIAgent(name="Sales Agent")
-
-    response = rojak.run(
-        agent=agent,
-        messages=[{"role": "user", "content": "Transfer me to sales"}],
-        context_variables={"user_name": "John"}
+    response = await rojak.run(
+        id=str(uuid.uuid4()),
+        type="stateless",
+        task=TaskParams(
+            agent=agent,
+            messages=[{"role": "user", "content": "Transfer me to sales"}],
+            context_variables={"user_name": "John"},
+        ),
     )
-    print(response.agent.name)
-    print(response.context_variables)
+    print(response.result.agent.name)
+    print(response.result.context_variables)
 ```
 
 ```
@@ -515,36 +604,43 @@ Available built-in retrievers:
 Below is an example configuration for an agent that interacts with a local Qdrant service to retrieve relevant data:
 ```python
 from rojak import Rojak
-from rojak.agents import OpenAIAgent, OpenAIAgentActivities
+from rojak.agents import OpenAIAgent, OpenAIAgentActivities, OpenAIAgentOptions
 from rojak.retrievers import QdrantRetriever, QdrantRetrieverActivities, QdrantRetrieverOptions
+from rojak.workflows import TaskParams
+import uuid
 
 # Configure Qdrant Retriever Activities
 qdrant_activities = QdrantRetrieverActivities(
     QdrantRetrieverOptions(
-        url="http://localhost:6333", 
+        url="http://localhost:6333",
         collection_name="demo_collection"
     )
 )
 
-openai_activities = OpenAIAgentActivities()
+# Configure OpenAI Agent Activities
+openai_activities = OpenAIAgentActivities(
+    OpenAIAgentOptions()
+)
 
-rojak = Rojak(temporal_client, task_queue="tasks")
-
-# Create a worker to handle tasks for the agent and retriever activities
+# Initialize Rojak and create a worker for the agent and retriever activities
+rojak = Rojak(client=temporal_client, task_queue="tasks")
 worker = await rojak.create_worker(
-    agent_activities=[openai_activities], 
-    retriever_activities=[qdrant_activities]
+    [openai_activities, qdrant_activities]
 )
 
 async with worker:
-    agent = OpenAIAgent(
-        retriever=QdrantRetriever() # Attach the retriever to the agent
-    )
+    retriever = QdrantRetriever()  # Define the retriever instance
+    agent = OpenAIAgent(retriever=retriever)  # Attach the retriever to the agent
+
     response = await rojak.run(
-        agent=agent,
-        messages=[{"role": "user", "content": "Hello, can you tell me more about myself?"}],
+        id=str(uuid.uuid4()),
+        type="stateless",
+        task=TaskParams(
+            agent=agent,
+            messages=[{"role": "user", "content": "Hello, can you tell me more about myself?"}],
+        ),
     )
-    print(response.messages[-1]["content"])
+    print(response.result.messages[-1].content)
 ```
 
 ### Timeouts and Retries
@@ -568,102 +664,6 @@ agent = OpenAIAgent(retry_options=RetryOptions(
 ```
 
 
-## Sessions
-
-Session creates a long-running Orchestrator workflow, allowing for persistence of messages, `context_variables`, and other configurations across multiple calls. This is particularly useful for maintaining a record of messages and updated `context_variables` during long-running conversations. Sessions also allow you to handle multiple concurrent conversations seamlessly.
-
-### `rojak.create_session()`
-
-You can create a session using the rojak.create_session() method by providing the following parameters:
-- Session Id: A unique identifier for the session.
-- Initial Agent: The agent that will handle the conversation.
-- Initial context_variables: The initial state of context_variables for the session.
-- Other Settings: Optional settings such as the maximum turns per call or the history size.
-
-If a session with the same session id was already created, `rojak.create_session()` will return the previously created session.
-
-```python
-session = await rojak.create_session(
-    session_id="unique-session-id",
-    agent=initial_agent,
-    max_turns=20,
-    history_size=15,
-    debug=True
-)
-```
-
-#### Arguments
-
-| Argument              | Type    | Description                                                                                  | Default        |
-| --------------------- | ------- | -------------------------------------------------------------------------------------------- | -------------- |
-| **session_id**        | `str`   | Unique identifier of the session.                                                            | (required)     |
-| **agent**             | `Agent` | The initial agent to be called.                                                              | (required)     |
-| **context_variables** | `Agent` | A dictionary of additional context variables, available to functions and Agent instructions. | `{}`           |
-| **max_turns**         | `int`   | The maximum number of conversational turns allowed.                                          | `float("inf")` |
-| **history_size**      | `int`   | The maximum number of messages.                                                              | `10`           |
-| **debug**             | `bool`  | If `True`, enables debug logging.                                                            | `False`        |
-
-The `history_size` argument limits the maximum number of messages stored. If this limit is reached, Rojak will only retain the most recent n messages.
-
-### `session.get_session()`
-
-If you have a already running session, you can get it using `session.get_session()` method. This method returns the running session.
-
-#### Arguments
-| Argument       | Type  | Description                       | Default    |
-| -------------- | ----- | --------------------------------- | ---------- |
-| **session_id** | `str` | Unique identifier of the session. | (required) |
-
-### `session.send_messages()`
-
-The `send_messages()` method passes your messages to the agent specified. The response is an `OrchestratorResponse`, similar to the response from `rojak.run()`.
-
-#### Arguments
-
-| Argument     | Type                        | Description                            | Default    |
-| ------------ | --------------------------- | -------------------------------------- | ---------- |
-| **messages** | `list[ConversationMessage]` | New query as a list of message object. | (required) |
-| **agent**    | `Agent`                     | Agent to send the message to.          | (required) |
-
-```python
-
-agent = OpenAIAgent(
-    name="Support Agent",
-    instructions="Assist users with any issues they face."
-)
-
-# Create the session
-session = await rojak.create_session(
-    session_id="customer-support-123",
-    agent=agent,
-    context_variables={"order_id": "12345"}
-    max_turns=30,
-    history_size=20
-)
-
-# Send a message
-response = await session.send_messages(
-    messages=[{"role": "user", "content": "Can you help me with my order?"}],
-    agent=agent
-)
-
-print(response.messages[-1]["content"])
-
-# Send another message
-await session.send_messages(
-    messages=[{"role": "user", "content": "Thank you!"}],
-    agent=agent
-)
-```
-
-### Other Session methods
-
-- `session.get_result()`: Get the latest `OrchestratorResponse`.
-- `session.get_config()`: Get the current configuration.
-- `session.update_config()`: Update the current configuration.
-- `session.cancel()`: Cancel the long-running workflow.
-
-
 ## Schedules
 
 Schedules allow you to automatically execute workflows at specific times, on specific days or dates, or at regular intervals, making them ideal for automating recurring tasks or time-based operations.
@@ -674,33 +674,36 @@ You can create a schedule by specifying the timing details (schedule_spec) and t
 
 #### Arguments
 
-| Argument              | Type                        | Description                                                                                  | Default        |
-| --------------------- | --------------------------- | -------------------------------------------------------------------------------------------- | -------------- |
-| **schedule_id**       | `str`                       | Unique identifier of the schedule.                                                           | (required)     |
-| **schedule_spec**     | `ScheduleSpec`              | Specification on when the action is taken.                                                   | (required)     |
-| **agent**             | `Agent`                     | The initial agent to be called.                                                              | (required)     |
-| **messages**          | `list[ConversationMessage]` | A list of message objects.                                                                   | (required)     |
-| **context_variables** | `dict`                      | A dictionary of additional context variables, available to functions and Agent instructions. | `{}`           |
-| **max_turns**         | `int`                       | The maximum number of conversational turns allowed.                                          | `float("inf")` |
-| **debug**             | `bool`                      | If True, enables debug logging.                                                              | `False`        |
+| Argument              | Type           | Description                                                                             | Default        |
+| --------------------- | -------------- | --------------------------------------------------------------------------------------- | -------------- |
+| **schedule_id**       | `str`          | Unique identifier of the schedule.                                                      | (required)     |
+| **schedule_spec**     | `ScheduleSpec` | Specification on when the action is taken.                                              | (required)     |
+| **task**              | `TaskParams`   | Encapsulates the agent, messages, and additional parameters for the scheduled workflow. | (required)     |
+| **context_variables** | `dict`         | Additional context variables available to functions and agent instructions.             | `{}`           |
+| **max_turns**         | `int`          | Maximum number of conversational turns allowed.                                         | `float("inf")` |
+| **history_size**      | `int`          | Maximum number of messages retained in the conversation history.                        | `10`           |
+| **debug**             | `bool`         | If True, enables debug logging.                                                         | `False`        |
 
 
 ```python
 from rojak import Rojak, ScheduleSpec, ScheduleIntervalSpec
 from datetime import timedelta
 from temporalio.client import Client
-
+from rojak.workflows import TaskParams
 
 temporal_client = await Client.connect("localhost:7233")
 rojak = Rojak(temporal_client, task_queue="tasks")
 
 # Create schedule to start a run every hour.
 await rojak.create_schedule(
-    schedule_id=schedule_id,
+    schedule_id="schedule_123",
     schedule_spec=ScheduleSpec(
-        intervals=[ScheduleIntervalSpec(every=timedelta(hours=1))]),
-    agent=agent,
-    messages=[{"role": "user", "content": "Hello"}],
+        intervals=[ScheduleIntervalSpec(every=timedelta(hours=1))]
+    ),
+    task=TaskParams(
+        agent=OpenAIAgent(),
+        messages=[{"role": "user", "content": "Hello"}],
+    ),
 )
 ```
 
@@ -711,13 +714,13 @@ This method retrieves a list of orchestrator workflow IDs associated with a sche
 ```python
 rojak = Rojak(temporal_client, task_queue="tasks")
 
-agent_activities = OpenAIAgentActivities(OpenAIAgentOptions())
+agent_activities = OpenAIAgentActivities()
 
 worker = await rojak.create_worker(agent_activities=[agent_activities])
 
 async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Completed"]):
     async with worker:
-        response = await rojak.get_run_result(workflow_id)
+        response = await rojak.get_result(workflow_id)
         print(response.messages[-1].content)
     break
 ```
@@ -725,6 +728,51 @@ async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Compl
 ```
 Hello! How can I assist you today?
 ```
+
+## Human In The Loop
+
+This feature ensures that humans can seamlessly intervene in workflows to maintain control over critical decisions. This is especially useful in scenarios requiring validation, approval, or manual oversight before proceeding with automated tasks.
+
+### Define Interrupts
+
+Use interrupts to identify points in the workflow where human intervention is required. For example, you can configure an interrupt to pause the workflow when a specific tool is invoked.
+
+```python
+from rojak.types.types import Interrupt
+
+ agent = OpenAIAgent(
+     name="Agent A",
+     functions=["process_payment"],
+     interrupts=[Interrupt("process_payment")],
+ )
+```
+
+### Handling Interrupts
+
+When an interrupt is triggered, Rojak pauses the workflow and returns a ResumeRequest, prompting the human to decide whether to approve or reject the tool invocation.
+
+```python
+if isinstance(response.result, ResumeRequest):
+    print(f"Interrupt triggered: {response.result.tool_name}")
+    resume_response = ResumeResponse(action="approve", tool_id=response.result.tool_id)
+    final_response = await rojak.run(
+        id="workflow_id",
+        resume=resume_response,
+    )
+```
+
+### Resuming workflows
+
+Based on the human’s decision, the workflow either continues execution (on approval) or skips the interrupted action (on rejection) and retry again. Optional feedback can be provided during rejection to inform the agent.
+
+```python
+reject_response = ResumeResponse(
+    action="reject",
+    tool_id=response.result.tool_id,
+    content="The tool call is unnecessary."
+)
+```
+
 
 ## Model Context Protocol (MCP) Servers
 
@@ -737,40 +785,54 @@ To connect to MCP servers, specify the servers you want to connect to using `MCP
 Below is an example demonstrating how to configure MCP servers and handle requests:
 ```python
 # For full code see examples/mcp_weather/main.py
-
+import uuid
+from rojak import Rojak
+from rojak.agents import OpenAIAgent, OpenAIAgentActivities, OpenAIAgentOptions
 from rojak.types import MCPServerConfig
+from rojak.workflows import TaskParams
 
-# ...Skipping initial setup
+openai_activities = OpenAIAgentActivities(
+    OpenAIAgentOptions()
+)
 
+rojak = Rojak(client=temporal_client, task_queue="tasks")
+
+# Create a worker with MCP Server configuration
 worker = await rojak.create_worker(
     [openai_activities],
     mcp_servers={
         "weather": MCPServerConfig(
-            type="stdio", 
-            command="python", 
-            args=["mcp_weather_server.py"]
+            type="stdio",
+            command="python",
+            args=["mcp_weather_server.py"],
         ),
+        # Example of additional server
         # "example_server": MCPServerConfig(
-        #     type="sse", 
-        #     url="http://localhost:8000/sse"
-        # )
+        #     type="sse",
+        #     url="http://localhost:8000/sse",
+        # ),
     },
 )
+
+agent = OpenAIAgent()
 
 try:
     async with worker:
         response = await rojak.run(
             id=str(uuid.uuid4()),
-            agent=agent,
-            messages=[
-                {
-                    "role": "user",
-                    "content": "What is the weather like in San Francisco?",
-                }
-            ],
+            type="stateless",
+            task=TaskParams(
+                agent=agent,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "What is the weather like in San Francisco?",
+                    }
+                ],
+            ),
             debug=True,
         )
-        print(response.messages[-1].content)
+        print(response.result.messages[-1].content)
 finally:
     # Clean up MCP resources
     await rojak.cleanup_mcp()

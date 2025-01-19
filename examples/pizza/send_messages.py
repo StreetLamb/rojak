@@ -1,7 +1,10 @@
+from typing import Literal
 from rojak import Rojak
 from temporalio.client import Client
 import asyncio
 from examples.pizza.agents import triage_agent
+from rojak.agents import ResumeRequest, ResumeResponse
+from rojak.workflows import OrchestratorResponse, TaskParams
 
 
 SESSION_ID = "session_1"
@@ -14,33 +17,71 @@ async def main():
 
     agent = triage_agent
 
-    session = await rojak.create_session(
-        SESSION_ID,
-        agent,
-        history_size=30,
-        debug=True,
-        context_variables={
-            "name": "John",
-            "cart": {},
-            "preferences": "Loves healthy food, allergic to nuts.",
-        },
-    )
+    state: Literal["Resume", "Response"] = "Response"
 
-    response = await session.update_config({"debug": True})
+    tool_id: str | None = None
+    tool_name: str | None = None
+
+    try:
+        configs = await rojak.get_config(SESSION_ID)
+        messages = configs.messages
+        if messages[-1].tool_calls:
+            state = "Resume"
+            tool_id = messages[-1].tool_calls[-1]["id"]
+            tool_name = messages[-1].tool_calls[-1]["name"]
+    except Exception:
+        pass
 
     while True:
-        prompt = input("Enter your message (or 'exit' to quit): ")
+        if state == "Response":
+            prompt = input("Enter your message (or 'exit' to quit): ")
+        else:
+            prompt = input(
+                f"Resume '{tool_name}'? Enter 'approve' or state why you reject: "
+            )
+
         if prompt.lower() == "exit":
             break
 
-        response = await session.send_messages(
-            [{"role": "user", "content": prompt}],
-            agent,
-        )
+        if state == "Response":
+            response = await rojak.run(
+                id=SESSION_ID,
+                type="persistent",
+                task=TaskParams(
+                    messages=[{"role": "user", "content": prompt}], agent=agent
+                ),
+                context_variables={
+                    "name": "John",
+                    "cart": {},
+                    "preferences": "Loves healthy food, allergic to nuts.",
+                },
+                debug=True,
+            )
+        else:
+            if prompt == "approve":
+                resume = ResumeResponse(action=prompt, tool_id=tool_id)
+            else:
+                resume = ResumeResponse(
+                    action="reject", tool_id=tool_id, content=prompt
+                )
 
-        agent = response.agent  # Update the agent for the next message
+            response = await rojak.run(
+                SESSION_ID,
+                resume=resume,
+            )
 
-        print(response.messages[-1].content)
+        if isinstance(response.result, OrchestratorResponse):
+            state = "Response"
+            agent = response.result.agent
+            print(response.result.messages[-1].content)
+
+        elif isinstance(response.result, ResumeRequest):
+            print(response.result)
+            state = "Resume"
+            tool_id = response.result.tool_id
+            tool_name = response.result.tool_name
+        else:
+            print(response)
 
 
 if __name__ == "__main__":

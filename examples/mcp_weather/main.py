@@ -4,6 +4,7 @@ from temporalio.client import Client
 from rojak.agents import OpenAIAgent, OpenAIAgentActivities
 from rojak.client import Rojak
 from rojak.types import MCPServerConfig, RetryOptions, RetryPolicy
+from rojak.workflows import TaskParams, OrchestratorResponse
 
 
 async def main():
@@ -25,16 +26,22 @@ async def main():
         async with worker:
             response = await rojak.run(
                 id=str(uuid.uuid4()),
-                agent=agent,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": "Weather like in San Francisco?",
-                    }
-                ],
+                task=TaskParams(
+                    agent=agent,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Weather like in San Francisco?",
+                        }
+                    ],
+                ),
+                type="stateless",
                 debug=True,
             )
-            print(response.messages[-1].content)
+
+            assert isinstance(response.result, OrchestratorResponse)
+
+            print(response.result.messages[-1].content)
     finally:
         await rojak.cleanup_mcp()
 

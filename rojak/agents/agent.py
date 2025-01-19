@@ -133,6 +133,55 @@ class AgentInstructionOptions:
 
 
 @dataclass
+class Interrupt:
+    tool_name: str
+    """The name of the tool to interrupt."""
+
+    question: str = ""
+    """The question to ask the user."""
+
+    when: Literal["before"] = "before"
+    """When the interrupt should be triggered."""
+
+
+@dataclass
+class ResumeRequest:
+    """Request to resume the interrupted agent."""
+
+    tool_id: str
+    """The ID of the tool that is interrupted."""
+
+    tool_arguments: str
+    """Arguments that will be passed to the tool that was interrupted."""
+
+    task_id: str
+    """Unique identifier of the request that triggered the interrupt."""
+
+    tool_name: str
+    """The name of the tool to interrupt."""
+
+    question: str = ""
+    """The question to ask the user."""
+
+    when: Literal["before"] = "before"
+    """When the interrupt should be triggered."""
+
+
+@dataclass
+class ResumeResponse:
+    """Response to resume the interrupted agent."""
+
+    action: Literal["approve", "reject"]
+    """Action to take on the interrupt."""
+
+    tool_id: str
+    """Tool call id to resume."""
+
+    content: str | None = None
+    """Feedback to pass to Agent. Only for 'rejected' action."""
+
+
+@dataclass
 class Agent(ABC):
     model: str
     """The LLM model to use."""
@@ -154,6 +203,9 @@ class Agent(ABC):
 
     parallel_tool_calls: bool = True
     """Whether model should perform multiple tool calls together."""
+
+    interrupts: list[Interrupt] = field(default_factory=list)
+    """List of interrupts for reviewing tool use."""
 
     retriever: Retriever | None = None
     """Specify which retriever to use."""

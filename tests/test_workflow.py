@@ -9,7 +9,7 @@ from rojak.agents import (
     OpenAIAgentActivities,
     OpenAIAgentOptions,
 )
-from rojak.workflows import OrchestratorResponse, UpdateConfigParams
+from rojak.workflows import UpdateConfigParams, TaskParams
 from tests.mock_client import MockOpenAIClient, create_mock_response
 
 DEFAULT_RESPONSE_CONTENT = "sample response content"
@@ -59,18 +59,19 @@ async def test_max_turns(mock_openai_client: MockOpenAIClient):
         worker = await rojak.create_worker([openai_activities])
         async with worker:
             agent = agent1
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
+
+            response = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="persistent",
+                task=TaskParams(
+                    agent=agent,
+                    messages=[{"role": "user", "content": "Hello how are you?"}],
+                ),
                 max_turns=2,
             )
 
-            response = await session.send_messages(
-                agent=agent,
-                messages=[{"role": "user", "content": "Hello how are you?"}],
-            )
             # Should not reach agent 2.
-            assert response.messages[-1].sender != "Test Agent 2"
+            assert response.result.messages[-1].sender != "Test Agent 2"
 
 
 @pytest.mark.asyncio
@@ -84,18 +85,20 @@ async def test_history_size(mock_openai_client: MockOpenAIClient):
         worker = await rojak.create_worker([openai_activities])
         async with worker:
             agent = OpenAIAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()), agent=agent, history_size=1
+
+            response = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="persistent",
+                task=TaskParams(
+                    agent=agent,
+                    messages=[{"role": "user", "content": "Hello how are you?"}],
+                ),
+                history_size=1,
             )
 
-            response = await session.send_messages(
-                agent=agent,
-                messages=[{"role": "user", "content": "Hello how are you?"}],
-            )
+            assert len(response.result.messages) == 2
 
-            assert len(response.messages) == 2
-
-            config = await session.get_config()
+            config = await rojak.get_config(response.id)
 
             assert len(config.messages) == 1
 
@@ -124,26 +127,26 @@ async def test_continue_as_new(mock_openai_client: MockOpenAIClient):
                     "history_size": 10,
                     "debug": True,
                 }
-                session = await rojak.create_session(
-                    session_id=str(uuid.uuid4()),
-                    agent=configs["agent"],
+
+                response = await rojak.run(
+                    id=str(uuid.uuid4()),
+                    type="persistent",
+                    task=TaskParams(
+                        agent=configs["agent"],
+                        messages=[{"role": "user", "content": "Hello how are you?"}],
+                    ),
                     max_turns=configs["max_turns"],
                     context_variables=configs["context_variables"],
                     history_size=configs["history_size"],
                     debug=configs["debug"],
                 )
 
-                await session.send_messages(
-                    agent=agent,
-                    messages=[{"role": "user", "content": "Hello how are you?"}],
-                )
                 await asyncio.sleep(1)
 
                 mock_workflow_info.get_current_history_size.assert_called_once()
                 mock_workflow_info.get_current_history_length.assert_called_once()
 
-                session = await rojak.get_session(session_id=session.workflow_handle.id)
-                response = await session.get_config()
+                response = await rojak.get_config(response.id)
                 assert response.max_turns == configs["max_turns"]
                 assert response.context_variables == configs["context_variables"]
                 assert response.history_size == configs["history_size"]
@@ -162,17 +165,17 @@ async def test_get_result(mock_openai_client: MockOpenAIClient):
         worker = await rojak.create_worker([openai_activities])
         async with worker:
             agent = OpenAIAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
+
+            response = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="persistent",
+                task=TaskParams(
+                    agent=agent,
+                    messages=[{"role": "user", "content": "Hello how are you?"}],
+                ),
             )
 
-            await session.send_messages(
-                agent=agent,
-                messages=[{"role": "user", "content": "Hello how are you?"}],
-            )
-
-            response: OrchestratorResponse = await session.get_result()
+            response = await rojak.get_result(response.id, response.task_id)
 
             assert response.agent == agent
             assert response.messages[-1].role == "assistant"
@@ -190,26 +193,27 @@ async def test_update_config(mock_openai_client: MockOpenAIClient):
         worker = await rojak.create_worker([openai_activities])
         async with worker:
             agent = OpenAIAgent(name="assistant")
-            session = await rojak.create_session(
-                session_id=str(uuid.uuid4()),
-                agent=agent,
+
+            response = await rojak.run(
+                id=str(uuid.uuid4()),
+                type="persistent",
+                task=TaskParams(
+                    agent=agent,
+                    messages=[{"role": "user", "content": "Hello how are you?"}],
+                ),
             )
 
-            await session.send_messages(
-                agent=agent,
-                messages=[{"role": "user", "content": "Hello how are you?"}],
-            )
-
-            await session.update_config(
+            await rojak.update_config(
+                response.id,
                 UpdateConfigParams(
                     context_variables={"hello": "world"},
                     max_turns=100,
                     debug=True,
                     messages=[{"role": "user", "content": "Hello"}],
-                )
+                ),
             )
 
-            response = await session.get_config()
+            response = await rojak.get_config(response.id)
 
             assert response.debug is True
             assert response.max_turns == 100

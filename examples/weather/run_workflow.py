@@ -3,6 +3,7 @@ from temporalio import client
 from rojak.agents import OpenAIAgent
 from rojak.types import RetryOptions, RetryPolicy
 from rojak import Rojak
+from rojak.workflows import OrchestratorResponse, TaskParams
 
 
 async def main() -> None:
@@ -20,23 +21,25 @@ async def main() -> None:
         parallel_tool_calls=False,
     )
 
-    session = await rojak.create_session(
-        session_id="weather-session",
-        agent=weather_agent,
+    response = await rojak.run(
+        "weather-session",
+        task=TaskParams(
+            agent=weather_agent,
+            messages=[
+                {
+                    "role": "user",
+                    "content": "What is the weather like in Malaysia and Singapore? Send an email to john@example.com",
+                }
+            ],
+        ),
         max_turns=30,
         debug=True,
+        type="persistent",
     )
 
-    response = await session.send_messages(
-        messages=[
-            {
-                "role": "user",
-                "content": "What is the weather like in Malaysia and Singapore? Send an email to john@example.com",
-            }
-        ],
-        agent=weather_agent,
-    )
-    print(response.messages[-1].content)
+    assert isinstance(response.result, OrchestratorResponse)
+
+    print(response.result.messages[-1].content)
 
 
 if __name__ == "__main__":
