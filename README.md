@@ -709,13 +709,13 @@ This method retrieves a list of orchestrator workflow IDs associated with a sche
 ```python
 rojak = Rojak(temporal_client, task_queue="tasks")
 
-agent_activities = OpenAIAgentActivities(OpenAIAgentOptions())
+agent_activities = OpenAIAgentActivities()
 
 worker = await rojak.create_worker(agent_activities=[agent_activities])
 
 async for workflow_id in rojak.list_scheduled_runs(schedule_id, statuses=["Completed"]):
     async with worker:
-        response = await rojak.get_run_result(workflow_id)
+        response = await rojak.get_result(workflow_id)
         print(response.messages[-1].content)
     break
 ```
