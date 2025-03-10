@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "Durable and scalable multi-agent orchestration framework."
 authors = ["StreetLamb <l.y.z.jerron@gmail.com>"]
 readme = "README.md"
+exclude = ["examples/*"]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -11,12 +12,14 @@ temporalio = "^1.8.0"
 openai = {version = "^1.55.3", optional = true}
 qdrant-client = {extras = ["fastembed"], version = "^1.12.1", optional = true}
 anthropic = {extras = ["bedrock"], version = "^0.42.0", optional = true}
+streamlit = {version = "^1.41.1", optional = true}
 mcp = "^1.2.0"
 
 [tool.poetry.extras]
 openai = ["openai"]
 anthropic = ["anthropic"]
 qdrant-client = ["qdrant-client"]
+examples = ["streamlit"]
 
 
 [tool.poetry.group.dev.dependencies]
